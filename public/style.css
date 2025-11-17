@@ -1,0 +1,18 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #faf6ff;
+  padding: 20px;
+}
+
+#leaderboard {
+  border: 2px solid #333;
+  padding: 10px;
+  margin-bottom: 20px;
+  background: white;
+}
+
+button {
+  padding: 12px 20px;
+  font-size: 1.2rem;
+  margin-top: 10px;
+}
