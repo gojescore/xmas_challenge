@@ -1,5 +1,18 @@
-// Connect to Socket.IO server (same origin)
-const socket = io();
+// Try to connect to Socket.IO server (same origin).
+// If not available, fall back to a dummy socket so the UI still works.
+let socket = null;
+
+if (typeof io !== "undefined") {
+  socket = io();
+  console.log("Socket.IO: trying to connect from admin page.");
+} else {
+  console.warn("Socket.IO not found. Running in local-only mode.");
+  socket = {
+    emit: () => {},
+    on: () => {},
+    disconnected: true,
+  };
+}
 
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
@@ -69,10 +82,17 @@ function loadStateFromLocal() {
   }
 }
 
+// --- Helper: update current challenge text only (no sync) ---
+function updateCurrentChallengeTextOnly() {
+  currentChallengeText.textContent = currentChallengeType
+    ? `Aktuel udfordring: ${currentChallengeType}`
+    : "Ingen udfordring valgt endnu.";
+}
+
 // --- Sync to server (real-time) ---
 function syncToServer() {
-  if (!socket || socket.disconnected) {
-    console.warn("Socket not connected, cannot sync state right now.");
+  if (!socket || typeof socket.emit !== "function" || socket.disconnected) {
+    // Just skip syncing if no real socket
     return;
   }
 
@@ -181,9 +201,7 @@ function changePoints(teamId, delta) {
 
 function setCurrentChallenge(type) {
   currentChallengeType = type;
-  currentChallengeText.textContent = type
-    ? `Aktuel udfordring: ${type}`
-    : "Ingen udfordring valgt endnu.";
+  updateCurrentChallengeTextOnly();
   saveStateToLocal();
   syncToServer();
 }
@@ -246,7 +264,7 @@ function handleReset() {
   }
 
   renderTeams();
-  setCurrentChallenge(null);
+  updateCurrentChallengeTextOnly();
   syncToServer();
   teamNameInput.focus();
 }
@@ -293,48 +311,46 @@ incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
 resetBtn.addEventListener("click", handleReset);
 
-// --- Socket.IO: Receive state from server ---
-socket.on("connect", () => {
-  console.log("Connected to server as admin:", socket.id);
-});
+// --- Socket.IO: Receive state from server (if available) ---
+if (socket && typeof socket.on === "function") {
+  socket.on("connect", () => {
+    console.log("Connected to server as admin:", socket.id);
+  });
 
-socket.on("state", (serverState) => {
-  console.log("Received state from server:", serverState);
+  socket.on("state", (serverState) => {
+    console.log("Received state from server:", serverState);
 
-  if (!serverState) return;
+    if (!serverState) return;
 
-  // Use server's version as truth
-  if (Array.isArray(serverState.teams)) {
-    teams = serverState.teams;
-  } else {
-    teams = [];
-  }
+    // Use server's version as truth
+    if (Array.isArray(serverState.teams)) {
+      teams = serverState.teams;
+    } else {
+      teams = [];
+    }
 
-  currentChallengeType =
-    serverState.currentChallenge === undefined
-      ? null
-      : serverState.currentChallenge;
+    currentChallengeType =
+      serverState.currentChallenge === undefined
+        ? null
+        : serverState.currentChallenge;
 
-  // Rebuild nextTeamId from existing teams
-  const maxId = teams.reduce(
-    (max, t) => Math.max(max, t.id || 0),
-    0
-  );
-  nextTeamId = maxId + 1;
+    // Rebuild nextTeamId from existing teams
+    const maxId = teams.reduce(
+      (max, t) => Math.max(max, t.id || 0),
+      0
+    );
+    nextTeamId = maxId + 1;
 
-  // Save server state locally just for backup/preload
-  saveStateToLocal();
+    // Save server state locally just for backup/preload
+    saveStateToLocal();
 
-  renderTeams();
-  setCurrentChallenge(currentChallengeType);
-});
+    renderTeams();
+    updateCurrentChallengeTextOnly();
+  });
+}
 
 // --- Initial load (local first, then server will override if different) ---
 loadStateFromLocal();
 renderTeams();
-setCurrentChallenge(currentChallengeType);
+updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-
-// Optionally, after a short delay, sync local-prepared teams to server
-// if you want to pre-build teams before connecting:
-// setTimeout(syncToServer, 1000);
