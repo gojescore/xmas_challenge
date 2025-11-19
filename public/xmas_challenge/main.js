@@ -1,3 +1,6 @@
+// Connect to Socket.IO server (same origin)
+const socket = io();
+
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
@@ -14,20 +17,20 @@ const endGameResultEl = document.getElementById("endGameResult");
 
 const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
 
-// --- State ---
+// --- Local state (mirrors server state) ---
 let teams = [];
 let nextTeamId = 1;
 let selectedTeamId = null;
 let currentChallengeType = null;
 
-// localStorage key
+// localStorage key (backup + prep)
 const STORAGE_KEY = "xmasChallengeState_v1";
 
 // Cooldown so you don't double-click while leaderboard is moving
 let isPointsCooldown = false;
 
-// --- Persistence helpers ---
-function saveState() {
+// --- Persistence helpers (localStorage only) ---
+function saveStateToLocal() {
   const state = {
     teams,
     nextTeamId,
@@ -36,18 +39,17 @@ function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
-    console.error("Could not save state", e);
+    console.error("Could not save state locally", e);
   }
 }
 
-function loadState() {
+function loadStateFromLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const state = JSON.parse(raw);
     if (state && Array.isArray(state.teams)) {
       teams = state.teams;
-      // Recover nextTeamId safely
       if (typeof state.nextTeamId === "number") {
         nextTeamId = state.nextTeamId;
       } else {
@@ -63,8 +65,24 @@ function loadState() {
           : state.currentChallengeType;
     }
   } catch (e) {
-    console.error("Could not load state", e);
+    console.error("Could not load state locally", e);
   }
+}
+
+// --- Sync to server (real-time) ---
+function syncToServer() {
+  if (!socket || socket.disconnected) {
+    console.warn("Socket not connected, cannot sync state right now.");
+    return;
+  }
+
+  const serverState = {
+    teams,
+    leaderboard: [], // can be used later if needed
+    currentChallenge: currentChallengeType,
+  };
+
+  socket.emit("updateState", serverState);
 }
 
 // --- Rendering ---
@@ -136,8 +154,9 @@ function addTeam(name) {
 
   selectedTeamId = null;
   teamNameInput.value = "";
-  saveState();
+  saveStateToLocal();
   renderTeams();
+  syncToServer();
   // focus input again so you can quickly add next team
   teamNameInput.focus();
 }
@@ -150,8 +169,9 @@ function changePoints(teamId, delta) {
   if (!team) return;
 
   team.points += delta;
-  saveState();
+  saveStateToLocal();
   renderTeams();
+  syncToServer();
 
   isPointsCooldown = true;
   setTimeout(() => {
@@ -164,7 +184,8 @@ function setCurrentChallenge(type) {
   currentChallengeText.textContent = type
     ? `Aktuel udfordring: ${type}`
     : "Ingen udfordring valgt endnu.";
-  saveState();
+  saveStateToLocal();
+  syncToServer();
 }
 
 // --- Challenge decision buttons ---
@@ -197,9 +218,7 @@ function handleNo() {
 
 function handleIncomplete() {
   if (!currentChallengeType) {
-    alert(
-      "Vælg en udfordring først."
-    );
+    alert("Vælg en udfordring først.");
     return;
   }
   alert(
@@ -223,11 +242,12 @@ function handleReset() {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch (e) {
-    console.error("Could not clear state", e);
+    console.error("Could not clear local state", e);
   }
 
   renderTeams();
   setCurrentChallenge(null);
+  syncToServer();
   teamNameInput.focus();
 }
 
@@ -271,10 +291,50 @@ yesBtn.addEventListener("click", handleYes);
 noBtn.addEventListener("click", handleNo);
 incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
-resetBtn.addEventListener("click", handleReset); // 🔁 reset handler
+resetBtn.addEventListener("click", handleReset);
 
-// --- Initial load ---
-loadState();
+// --- Socket.IO: Receive state from server ---
+socket.on("connect", () => {
+  console.log("Connected to server as admin:", socket.id);
+});
+
+socket.on("state", (serverState) => {
+  console.log("Received state from server:", serverState);
+
+  if (!serverState) return;
+
+  // Use server's version as truth
+  if (Array.isArray(serverState.teams)) {
+    teams = serverState.teams;
+  } else {
+    teams = [];
+  }
+
+  currentChallengeType =
+    serverState.currentChallenge === undefined
+      ? null
+      : serverState.currentChallenge;
+
+  // Rebuild nextTeamId from existing teams
+  const maxId = teams.reduce(
+    (max, t) => Math.max(max, t.id || 0),
+    0
+  );
+  nextTeamId = maxId + 1;
+
+  // Save server state locally just for backup/preload
+  saveStateToLocal();
+
+  renderTeams();
+  setCurrentChallenge(currentChallengeType);
+});
+
+// --- Initial load (local first, then server will override if different) ---
+loadStateFromLocal();
 renderTeams();
 setCurrentChallenge(currentChallengeType);
 teamNameInput.focus();
+
+// Optionally, after a short delay, sync local-prepared teams to server
+// if you want to pre-build teams before connecting:
+// setTimeout(syncToServer, 1000);
