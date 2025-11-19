@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Xmas Challenge – Main Control</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>🎄 Xmas Challenge – Game Master</h1>
+      <p>Opret hold, vælg udfordringer og styr pointene.</p>
+    </header>
+
+    <main class="layout">
+      <!-- LEFT: challenges + current challenge -->
+      <section class="main-panel">
+        <div class="teams-setup">
+          <h2>Hold</h2>
+          <div class="team-form">
+            <input id="teamNameInput" type="text" placeholder="Nyt holdnavn..." />
+            <button id="addTeamBtn">Tilføj hold</button>
+          </div>
+        </div>
+
+        <div class="challenge-picker">
+          <h2>Udfordringer</h2>
+          <div class="challenge-grid">
+            <button class="challenge-card" data-type="Nisse Grandprix">
+              Nisse Grandprix
+            </button>
+            <button class="challenge-card" data-type="FiNisse">
+              FiNisse
+            </button>
+            <button class="challenge-card" data-type="NisseGåden">
+              NisseGåden
+            </button>
+            <button class="challenge-card" data-type="VideoNissen">
+              VideoNissen
+            </button>
+            <button class="challenge-card" data-type="JuleKortet">
+              JuleKortet
+            </button>
+            <button class="challenge-card" data-type="Nisse-udfordringen">
+              Nisse-udfordringen
+            </button>
+          </div>
+        </div>
+
+        <div class="current-challenge">
+          <h2>Aktuel udfordring</h2>
+          <p id="currentChallengeText">Ingen udfordring valgt endnu.</p>
+
+          <div class="challenge-controls">
+            <button id="yesBtn" class="yes">✔ Ja</button>
+            <button id="noBtn" class="no">✖ Nej</button>
+            <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
+          </div>
+
+          <p class="hint">
+            Klik på et hold til højre for at markere vinderen, og tryk derefter “Ja”.
+          </p>
+        </div>
+
+        <div class="game-end">
+          <button id="endGameBtn" class="end-game">🏁 Afslut spil</button>
+          <p id="endGameResult" class="end-result"></p>
+        </div>
+      </section>
+
+      <!-- RIGHT: leaderboard -->
+      <aside class="sidebar">
+        <h2>Leaderboard</h2>
+        <p class="sidebar-hint">Klik på et hold for at vælge det. Brug + / - for point.</p>
+        <ul id="teamList" class="team-list">
+          <!-- JS will fill this -->
+        </ul>
+      </aside>
+    </main>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
