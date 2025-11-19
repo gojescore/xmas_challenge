@@ -12,15 +12,60 @@ const incompleteBtn = document.getElementById("incompleteBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
-// State
+// --- State ---
 let teams = [];
 let nextTeamId = 1;
 let selectedTeamId = null;
 let currentChallengeType = null;
 
-// Cooldown so you don't double-click while the list is moving
+// localStorage key
+const STORAGE_KEY = "xmasChallengeState_v1";
+
+// Cooldown so you don't double-click while leaderboard is moving
 let isPointsCooldown = false;
 
+// --- Persistence helpers ---
+function saveState() {
+  const state = {
+    teams,
+    nextTeamId,
+    currentChallengeType,
+  };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error("Could not save state", e);
+  }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const state = JSON.parse(raw);
+    if (state && Array.isArray(state.teams)) {
+      teams = state.teams;
+      // Recover nextTeamId safely
+      if (typeof state.nextTeamId === "number") {
+        nextTeamId = state.nextTeamId;
+      } else {
+        const maxId = teams.reduce(
+          (max, t) => Math.max(max, t.id || 0),
+          0
+        );
+        nextTeamId = maxId + 1;
+      }
+      currentChallengeType =
+        state.currentChallengeType === undefined
+          ? null
+          : state.currentChallengeType;
+    }
+  } catch (e) {
+    console.error("Could not load state", e);
+  }
+}
+
+// --- Rendering ---
 function renderTeams() {
   // Sort by points (desc), then by name
   const sorted = [...teams].sort((a, b) => {
@@ -76,6 +121,7 @@ function renderTeams() {
   });
 }
 
+// --- Team management ---
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -88,7 +134,10 @@ function addTeam(name) {
 
   selectedTeamId = null;
   teamNameInput.value = "";
+  saveState();
   renderTeams();
+  // focus input again so you can quickly add next team
+  teamNameInput.focus();
 }
 
 function changePoints(teamId, delta) {
@@ -99,6 +148,7 @@ function changePoints(teamId, delta) {
   if (!team) return;
 
   team.points += delta;
+  saveState();
   renderTeams();
 
   isPointsCooldown = true;
@@ -112,9 +162,10 @@ function setCurrentChallenge(type) {
   currentChallengeText.textContent = type
     ? `Aktuel udfordring: ${type}`
     : "Ingen udfordring valgt endnu.";
+  saveState();
 }
 
-// Challenge decision buttons
+// --- Challenge decision buttons ---
 function handleYes() {
   if (!currentChallengeType) {
     alert("Vælg en udfordring først.");
@@ -152,7 +203,7 @@ function handleIncomplete() {
   );
 }
 
-// End game logic
+// --- End game logic ---
 function handleEndGame() {
   if (teams.length === 0) {
     alert("Ingen hold endnu.");
@@ -170,7 +221,7 @@ function handleEndGame() {
   }
 }
 
-// Event listeners
+// --- Event listeners ---
 addTeamBtn.addEventListener("click", () => {
   addTeam(teamNameInput.value);
 });
@@ -193,6 +244,8 @@ noBtn.addEventListener("click", handleNo);
 incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
 
-// Initial render
+// --- Initial load ---
+loadState();
 renderTeams();
-setCurrentChallenge(null);
+setCurrentChallenge(currentChallengeType);
+teamNameInput.focus();
