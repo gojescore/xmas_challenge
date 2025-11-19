@@ -49,6 +49,14 @@ body {
   box-shadow: 0 3px 7px rgba(0,0,0,0.25);
 }
 
+/* Make header align title and reset button on one line */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 2.1rem;
