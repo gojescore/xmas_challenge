@@ -111,10 +111,17 @@ function updateCurrentChallengeTextOnly() {
 
 // --- Sync to server (real-time) ---
 function syncToServer() {
-  if (!socket || typeof socket.emit !== "function" || socket.disconnected) {
-    // Just skip syncing if no real socket
-    return;
-  }
+  if (!socket || typeof socket.emit !== "function" || socket.disconnected) return;
+
+  const serverState = {
+    // teams are NOT sent from admin anymore
+    leaderboard: [], 
+    currentChallenge: currentChallengeType,
+  };
+
+  socket.emit("updateState", serverState);
+}
+
 
   const serverState = {
     teams,
@@ -186,11 +193,30 @@ function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
 
-  teams.push({
-    id: nextTeamId++,
-    name: trimmed,
-    points: 0,
+  if (!socket || socket.disconnected) {
+    alert("Server ikke forbundet – kan ikke tilføje hold.");
+    return;
+  }
+
+  const code = gameCodeValueEl.textContent.trim();
+  if (!code || code === "—") {
+    alert("Start spillet først, så der kommer en game code.");
+    return;
+  }
+
+  // Use server uniqueness rules by joining as a team from admin
+  socket.emit("joinGame", { code, teamName: trimmed }, (res) => {
+    if (!res?.ok) {
+      alert(res?.message || "Kunne ikke tilføje hold.");
+      return;
+    }
+
+    teamNameInput.value = "";
+    teamNameInput.focus();
+    // state will come back via socket.on("state")
   });
+}
+
 
   selectedTeamId = null;
   teamNameInput.value = "";
@@ -375,5 +401,6 @@ renderTeams();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
 startGameBtn.addEventListener("click", handleStartGame);
+
 
 
