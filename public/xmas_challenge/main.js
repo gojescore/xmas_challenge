@@ -28,6 +28,9 @@ const incompleteBtn = document.getElementById("incompleteBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
+const startGameBtn = document.getElementById("startGameBtn");
+const gameCodeValueEl = document.getElementById("gameCodeValue");
+
 const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
 
 // --- Local state (mirrors server state) ---
@@ -55,6 +58,23 @@ function saveStateToLocal() {
     console.error("Could not save state locally", e);
   }
 }
+
+function handleStartGame() {
+  if (!socket || socket.disconnected) {
+    alert("Ingen forbindelse til serveren.");
+    return;
+  }
+
+  socket.emit("startGame", (res) => {
+    if (!res?.ok) {
+      alert("Kunne ikke starte spillet.");
+      return;
+    }
+    gameCodeValueEl.textContent = res.gameCode;
+    endGameResultEl.textContent = "";
+  });
+}
+
 
 function loadStateFromLocal() {
   try {
@@ -354,3 +374,6 @@ loadStateFromLocal();
 renderTeams();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+startGameBtn.addEventListener("click", handleStartGame);
+
+
