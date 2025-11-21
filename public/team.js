@@ -1,15 +1,6 @@
-// Team page (ES module)
+// Team page (ES module) — SAFE version with lazy mini-game loading
 
-// --- Mini-games imports ---
-import { renderGrandprix } from "./minigames/grandprix.js";
-// import { renderFiNisse } from "./minigames/finisse.js";
-// import { renderNisseGaaden } from "./minigames/nissegaaden.js";
-// import { renderJuleKortet } from "./minigames/julekortet.js";
-// import { renderNisseUdfordringen } from "./minigames/nisse_udfordringen.js";
-
-// Connect to the same server that serves this page
-// Replace: const socket = io();
-// With:
+// --- Socket init (defensive) ---
 let socket = null;
 
 if (typeof io !== "undefined") {
@@ -17,14 +8,12 @@ if (typeof io !== "undefined") {
   console.log("Socket.IO connected (team page).");
 } else {
   console.warn("Socket.IO not loaded yet. Using dummy socket.");
-
   socket = {
     emit: () => {},
     on: () => {},
     disconnected: true,
   };
 }
-
 
 let joined = false;
 let joinedCode = null;
@@ -47,17 +36,13 @@ const buzzBtn = document.getElementById("buzzBtn");
 const statusEl = document.getElementById("status");
 
 // --- Mini-game API ---
-// Mini-games can ONLY control buzz/status via this api,
-// so team.js stays clean.
 const api = {
   setBuzzEnabled(enabled) {
     buzzBtn.disabled = !enabled;
   },
-
   showStatus(text) {
     statusEl.textContent = text;
   },
-
   clearMiniGame() {
     statusEl.textContent = "";
     buzzBtn.disabled = true;
@@ -67,8 +52,6 @@ const api = {
 // ----------------------
 // JOIN FLOW
 // ----------------------
-
-// Step 1: enter code
 codeBtn.addEventListener("click", tryCode);
 codeInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") tryCode();
@@ -89,7 +72,6 @@ function tryCode() {
   nameInput.focus();
 }
 
-// Step 2: enter team name + joinGame
 nameBtn.addEventListener("click", tryJoinTeam);
 nameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") tryJoinTeam();
@@ -119,9 +101,7 @@ function tryJoinTeam() {
     joinMsg.textContent = `✅ I er nu med som: ${myTeamName}`;
     document.getElementById("joinSection").style.display = "none";
 
-    // IMPORTANT:
-    // Buzz is NOT enabled here anymore.
-    // Mini-games decide if buzz is allowed.
+    // Mini-games decide buzz (not here)
     api.clearMiniGame();
   });
 }
@@ -129,11 +109,9 @@ function tryJoinTeam() {
 // ----------------------
 // SOCKET EVENTS
 // ----------------------
-
 socket.on("state", (serverState) => {
   if (!serverState) return;
 
-  // Show the real game code if server sends it
   if (serverState.gameCode) {
     codeDisplay.textContent = serverState.gameCode;
   }
@@ -142,13 +120,11 @@ socket.on("state", (serverState) => {
   renderChallenge(serverState.currentChallenge);
 });
 
-// Buzz click -> sends buzz to server (if joined)
 buzzBtn.addEventListener("click", () => {
   if (!joined) return;
   socket.emit("buzz");
 });
 
-// Someone buzzed (global feedback)
 socket.on("buzzed", (teamName) => {
   statusEl.textContent = `${teamName} buzzed først!`;
 });
@@ -156,7 +132,6 @@ socket.on("buzzed", (teamName) => {
 // ----------------------
 // RENDERING
 // ----------------------
-
 function renderLeaderboard(teams) {
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) {
@@ -180,13 +155,49 @@ function renderLeaderboard(teams) {
 
     li.appendChild(left);
     li.appendChild(right);
-
     teamListEl.appendChild(li);
   });
 }
 
+// --- Lazy mini-game loader ---
+// Map challenge type -> module path + export name
+const MINI_GAMES = {
+  "Nisse Grandprix": {
+    path: "./minigames/grandprix.js",
+    exportName: "renderGrandprix",
+  },
+
+  // Add later when files exist:
+  // "FiNisse": { path: "./minigames/finisse.js", exportName: "renderFiNisse" },
+  // "NisseGåden": { path: "./minigames/nissegaaden.js", exportName: "renderNisseGaaden" },
+  // "JuleKortet": { path: "./minigames/julekortet.js", exportName: "renderJuleKortet" },
+  // "Nisse-udfordringen": { path: "./minigames/nisse_udfordringen.js", exportName: "renderNisseUdfordringen" },
+};
+
+async function runMiniGame(type, challenge) {
+  const cfg = MINI_GAMES[type];
+  if (!cfg) {
+    api.clearMiniGame();
+    return;
+  }
+
+  try {
+    const mod = await import(cfg.path);
+    const fn = mod[cfg.exportName];
+    if (typeof fn === "function") {
+      fn(challenge, api);
+    } else {
+      console.warn(`Mini-game export not found: ${cfg.exportName}`);
+      api.clearMiniGame();
+    }
+  } catch (err) {
+    console.error("Mini-game failed to load:", cfg.path, err);
+    // Don’t kill the UI — just show default view
+    api.clearMiniGame();
+  }
+}
+
 function renderChallenge(challenge) {
-  // Default: mini-game OFF (buzz off etc.)
   api.clearMiniGame();
 
   if (!challenge) {
@@ -208,32 +219,5 @@ function renderChallenge(challenge) {
       challenge.text || "Se instruktioner på skærmen.";
   }
 
-  // Mini-game routing
-  switch (type) {
-    case "Nisse Grandprix":
-      renderGrandprix(challenge, api);
-      break;
-
-    // Uncomment these when you add the files + imports
-    // case "FiNisse":
-    //   renderFiNisse(challenge, api);
-    //   break;
-
-    // case "NisseGåden":
-    //   renderNisseGaaden(challenge, api);
-    //   break;
-
-    // case "JuleKortet":
-    //   renderJuleKortet(challenge, api);
-    //   break;
-
-    // case "Nisse-udfordringen":
-    //   renderNisseUdfordringen(challenge, api);
-    //   break;
-
-    default:
-      api.clearMiniGame();
-      break;
-  }
+  runMiniGame(type, challenge);
 }
-
