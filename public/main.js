@@ -1,5 +1,6 @@
-// Try to connect to Socket.IO server (same origin).
-// If not available, fall back to a dummy socket so the UI still works.
+// Admin / Main computer (ES5-style, no modules)
+
+// Socket setup
 let socket = null;
 
 if (typeof io !== "undefined") {
@@ -28,33 +29,36 @@ const incompleteBtn = document.getElementById("incompleteBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
-const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
+const resetBtn = document.getElementById("resetBtn");
 
-// ✅ NEW: Start game + show code
+// optional: if you later add a Start Game button in HTML
 const startGameBtn = document.getElementById("startGameBtn");
-const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// --- Local state (mirrors server state) ---
+// --- Local mirror of server state ---
 let teams = [];
-let nextTeamId = 1; // still used for local sorting/selection
+let nextTeamId = 1;
 let selectedTeamId = null;
-let currentChallengeType = null;
 
-// localStorage key (backup + prep)
-const STORAGE_KEY = "xmasChallengeState_v1";
+// currentChallenge can be string OR object (Grandprix)
+let currentChallenge = null;
+
+// localStorage key
+const STORAGE_KEY = "xmasChallengeState_v2";
 
 // Cooldown so you don't double-click while leaderboard is moving
 let isPointsCooldown = false;
 
-// --- Persistence helpers (localStorage only) ---
+// -----------------------------
+// Persistence
+// -----------------------------
 function saveStateToLocal() {
-  const state = {
+  const localState = {
     teams,
     nextTeamId,
-    currentChallengeType,
+    currentChallenge,
   };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(localState));
   } catch (e) {
     console.error("Could not save state locally", e);
   }
@@ -64,12 +68,12 @@ function loadStateFromLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const state = JSON.parse(raw);
-    if (state && Array.isArray(state.teams)) {
-      teams = state.teams;
+    const localState = JSON.parse(raw);
+    if (localState && Array.isArray(localState.teams)) {
+      teams = localState.teams;
 
-      if (typeof state.nextTeamId === "number") {
-        nextTeamId = state.nextTeamId;
+      if (typeof localState.nextTeamId === "number") {
+        nextTeamId = localState.nextTeamId;
       } else {
         const maxId = teams.reduce(
           (max, t) => Math.max(max, t.id || 0),
@@ -78,41 +82,55 @@ function loadStateFromLocal() {
         nextTeamId = maxId + 1;
       }
 
-      currentChallengeType =
-        state.currentChallengeType === undefined
+      currentChallenge =
+        localState.currentChallenge === undefined
           ? null
-          : state.currentChallengeType;
+          : localState.currentChallenge;
     }
   } catch (e) {
     console.error("Could not load state locally", e);
   }
 }
 
-// --- Helper: update current challenge text only (no sync) ---
+// -----------------------------
+// UI Helpers
+// -----------------------------
 function updateCurrentChallengeTextOnly() {
-  currentChallengeText.textContent = currentChallengeType
-    ? `Aktuel udfordring: ${currentChallengeType}`
-    : "Ingen udfordring valgt endnu.";
+  if (!currentChallenge) {
+    currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
+    return;
+  }
+
+  if (typeof currentChallenge === "string") {
+    currentChallengeText.textContent = `Aktuel udfordring: ${currentChallenge}`;
+  } else {
+    currentChallengeText.textContent =
+      `Aktuel udfordring: ${currentChallenge.type} (${currentChallenge.phase})`;
+  }
 }
 
-// --- Sync to server (real-time) ---
-// ✅ IMPORTANT: teams are now SERVER-OWNED, so admin does NOT send teams anymore.
+// -----------------------------
+// Sync to server
+// -----------------------------
 function syncToServer() {
   if (!socket || typeof socket.emit !== "function" || socket.disconnected) {
     return;
   }
 
   const serverState = {
-    leaderboard: [], // reserved for later
-    currentChallenge: currentChallengeType,
+    gameCode: undefined, // server keeps the real code
+    teams,
+    leaderboard: [],
+    currentChallenge,
   };
 
   socket.emit("updateState", serverState);
 }
 
-// --- Rendering ---
+// -----------------------------
+// Rendering
+// -----------------------------
 function renderTeams() {
-  // Sort by points (desc), then by name
   const sorted = [...teams].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     return a.name.localeCompare(b.name);
@@ -167,59 +185,24 @@ function renderTeams() {
 }
 
 // -----------------------------
-// ADMIN: START GLOBAL GAME
+// Team management
 // -----------------------------
-function handleStartGame() {
-  if (!socket || socket.disconnected) {
-    alert("Ingen forbindelse til serveren.");
-    return;
-  }
-
-  socket.emit("startGame", (res) => {
-    if (!res?.ok) {
-      alert("Kunne ikke starte spillet.");
-      return;
-    }
-    gameCodeValueEl.textContent = res.gameCode;
-
-    // local UI reset (server also reset already)
-    teams = [];
-    selectedTeamId = null;
-    currentChallengeType = null;
-    endGameResultEl.textContent = "";
-    saveStateToLocal();
-    renderTeams();
-    updateCurrentChallengeTextOnly();
-  });
-}
-
-// --- Team management ---
-// ✅ Manual add uses server joinGame so uniqueness is enforced globally.
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
 
-  if (!socket || socket.disconnected) {
-    alert("Server ikke forbundet – kan ikke tilføje hold.");
-    return;
-  }
-
-  const code = gameCodeValueEl.textContent.trim();
-  if (!code || code === "—") {
-    alert("Start spillet først, så der kommer en game code.");
-    return;
-  }
-
-  socket.emit("joinGame", { code, teamName: trimmed }, (res) => {
-    if (!res?.ok) {
-      alert(res?.message || "Kunne ikke tilføje hold.");
-      return;
-    }
-
-    teamNameInput.value = "";
-    teamNameInput.focus();
-    // teams list will update via server "state"
+  teams.push({
+    id: nextTeamId++,
+    name: trimmed,
+    points: 0,
   });
+
+  selectedTeamId = null;
+  teamNameInput.value = "";
+  saveStateToLocal();
+  renderTeams();
+  syncToServer();
+  teamNameInput.focus();
 }
 
 function changePoints(teamId, delta) {
@@ -239,52 +222,108 @@ function changePoints(teamId, delta) {
   }, 500);
 }
 
+// -----------------------------
+// Challenge selection
+// -----------------------------
 function setCurrentChallenge(type) {
-  currentChallengeType = type;
+  // Special case: Grandprix starts via server event (audio sync)
+  if (type === "Nisse Grandprix") {
+    const audioUrl = prompt(
+      "Indsæt lydfilens URL (fx /audio/grandprix/track1.mp3)"
+    );
+
+    if (!audioUrl) {
+      alert("Ingen lyd valgt. Grandprix blev ikke startet.");
+      return;
+    }
+
+    socket.emit("startGrandprix", {
+      audioUrl,
+      startDelayMs: 2000,
+    });
+
+    return; // server will broadcast state
+  }
+
+  // Normal challenges = just string
+  currentChallenge = type;
   updateCurrentChallengeTextOnly();
   saveStateToLocal();
   syncToServer();
 }
 
-// --- Challenge decision buttons ---
+// -----------------------------
+// YES / NO / INCOMPLETE buttons
+// -----------------------------
 function handleYes() {
-  if (!currentChallengeType) {
+  if (!currentChallenge) {
     alert("Vælg en udfordring først.");
     return;
   }
+
+  // If Grandprix and locked with firstBuzz => use server YES
+  if (
+    typeof currentChallenge === "object" &&
+    currentChallenge.type === "Nisse Grandprix" &&
+    currentChallenge.phase === "locked" &&
+    currentChallenge.firstBuzz
+  ) {
+    socket.emit("grandprixYes");
+    return;
+  }
+
+  // Otherwise manual award like before
   if (!selectedTeamId) {
     alert("Klik på et hold i leaderboardet for at vælge vinder.");
     return;
   }
+
   changePoints(selectedTeamId, 1);
-  alert(
-    `✔ Udfordring "${currentChallengeType}" er godkendt.\nHoldet fik 1 point.`
-  );
+  alert("✔ Point givet.");
 }
 
 function handleNo() {
-  if (!currentChallengeType) {
+  if (!currentChallenge) {
     alert("Vælg en udfordring først.");
     return;
   }
-  if (!selectedTeamId) {
-    alert("Vælg det hold, der fik nej (valgfrit).");
+
+  // Grandprix NO => resume listening and lock out that team
+  if (
+    typeof currentChallenge === "object" &&
+    currentChallenge.type === "Nisse Grandprix" &&
+    currentChallenge.phase === "locked" &&
+    currentChallenge.firstBuzz
+  ) {
+    // admin can optionally send audioPosition later
+    socket.emit("grandprixNo", {});
     return;
   }
-  alert(`✖ Udfordring "${currentChallengeType}" blev ikke godkendt.`);
+
+  alert("✖ Ikke godkendt.");
 }
 
 function handleIncomplete() {
-  if (!currentChallengeType) {
+  if (!currentChallenge) {
     alert("Vælg en udfordring først.");
     return;
   }
-  alert(
-    `❔ Udfordring "${currentChallengeType}" blev markeret som ikke fuldført.`
-  );
+
+  // Grandprix incomplete => end without points
+  if (
+    typeof currentChallenge === "object" &&
+    currentChallenge.type === "Nisse Grandprix"
+  ) {
+    socket.emit("grandprixIncomplete");
+    return;
+  }
+
+  alert("❔ Markerede som ikke fuldført.");
 }
 
-// --- Reset all data ---
+// -----------------------------
+// Reset / Start / End game
+// -----------------------------
 function handleReset() {
   const sure = confirm(
     "Er du sikker på, at du vil nulstille alle hold og point?\nDette kan ikke fortrydes."
@@ -294,13 +333,13 @@ function handleReset() {
   teams = [];
   nextTeamId = 1;
   selectedTeamId = null;
-  currentChallengeType = null;
+  currentChallenge = null;
   endGameResultEl.textContent = "";
 
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch (e) {
-    console.error("Could not clear local state", e);
+    console.error("Could not clear local storage", e);
   }
 
   renderTeams();
@@ -309,7 +348,12 @@ function handleReset() {
   teamNameInput.focus();
 }
 
-// --- End game logic ---
+// Start game = ask server to generate new code + clear state
+function handleStartGame() {
+  socket.emit("startGame");
+}
+
+// End game logic (same as before)
 function handleEndGame() {
   if (teams.length === 0) {
     alert("Ingen hold endnu.");
@@ -320,22 +364,21 @@ function handleEndGame() {
   const winners = sorted.filter((t) => t.points === topScore);
 
   if (winners.length === 1) {
-    endGameResultEl.textContent = `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`;
+    endGameResultEl.textContent =
+      `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`;
   } else {
     const names = winners.map((t) => t.name).join(", ");
-    endGameResultEl.textContent = `Der er uafgjort mellem: ${names} med ${topScore} point.`;
+    endGameResultEl.textContent =
+      `Der er uafgjort mellem: ${names} med ${topScore} point.`;
   }
 }
 
-// --- Event listeners ---
-addTeamBtn.addEventListener("click", () => {
-  addTeam(teamNameInput.value);
-});
-
+// -----------------------------
+// Event listeners
+// -----------------------------
+addTeamBtn.addEventListener("click", () => addTeam(teamNameInput.value));
 teamNameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    addTeam(teamNameInput.value);
-  }
+  if (event.key === "Enter") addTeam(teamNameInput.value);
 });
 
 challengeCards.forEach((card) => {
@@ -351,51 +394,45 @@ incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
 resetBtn.addEventListener("click", handleReset);
 
-if (startGameBtn) {
-  startGameBtn.addEventListener("click", handleStartGame);
-}
+// If you add a Start Game button later, it will work
+startGameBtn?.addEventListener("click", handleStartGame);
 
-// --- Socket.IO: Receive state from server (if available) ---
-if (socket && typeof socket.on === "function") {
-  socket.on("connect", () => {
-    console.log("Connected to server as admin:", socket.id);
-  });
+// -----------------------------
+// Socket receive state
+// -----------------------------
+socket.on("connect", () => {
+  console.log("Connected to server as admin:", socket.id);
+});
 
-  socket.on("state", (serverState) => {
-    console.log("Received state from server:", serverState);
-    if (!serverState) return;
+socket.on("state", (serverState) => {
+  console.log("Received state from server:", serverState);
+  if (!serverState) return;
 
-    // ✅ NEW — show game code when server sends it
-    if (serverState.gameCode) {
-      gameCodeValueEl.textContent = serverState.gameCode;
-    }
+  if (Array.isArray(serverState.teams)) {
+    teams = serverState.teams;
+  } else {
+    teams = [];
+  }
 
-    // Use server's version as truth for teams
-    if (Array.isArray(serverState.teams)) {
-      teams = serverState.teams;
-    } else {
-      teams = [];
-    }
+  currentChallenge =
+    serverState.currentChallenge === undefined
+      ? null
+      : serverState.currentChallenge;
 
-    currentChallengeType =
-      serverState.currentChallenge === undefined
-        ? null
-        : serverState.currentChallenge;
+  const maxId = teams.reduce(
+    (max, t) => Math.max(max, t.id || 0),
+    0
+  );
+  nextTeamId = maxId + 1;
 
-    // Rebuild nextTeamId from existing teams
-    const maxId = teams.reduce(
-      (max, t) => Math.max(max, t.id || 0),
-      0
-    );
-    nextTeamId = maxId + 1;
+  saveStateToLocal();
+  renderTeams();
+  updateCurrentChallengeTextOnly();
+});
 
-    saveStateToLocal();
-    renderTeams();
-    updateCurrentChallengeTextOnly();
-  });
-}
-
-// --- Initial load (local first, then server will override if different) ---
+// -----------------------------
+// Initial load
+// -----------------------------
 loadStateFromLocal();
 renderTeams();
 updateCurrentChallengeTextOnly();
