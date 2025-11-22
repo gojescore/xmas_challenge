@@ -1,6 +1,8 @@
-// Admin / Main computer (ES5-style, no modules)
+// public/main.js  (Admin / Main computer)
 
-// Socket setup
+// -----------------------------
+// SOCKET.IO setup
+// -----------------------------
 let socket = null;
 
 if (typeof io !== "undefined") {
@@ -15,6 +17,9 @@ if (typeof io !== "undefined") {
   };
 }
 
+// -----------------------------
+// DOM elements
+// -----------------------------
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
@@ -30,29 +35,30 @@ const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
 const resetBtn = document.getElementById("resetBtn");
-
+const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-
-// optional: if you later add a Start Game button in HTML
-const startGameBtn = document.getElementById("startGameBtn");
-
-// --- Local mirror of server state ---
+// -----------------------------
+// Local mirror of server state
+// -----------------------------
 let teams = [];
 let nextTeamId = 1;
 let selectedTeamId = null;
 
-// currentChallenge can be string OR object (Grandprix)
+// currentChallenge can be:
+// - null
+// - string (normal challenges)
+// - object (Grandprix)
 let currentChallenge = null;
 
 // localStorage key
 const STORAGE_KEY = "xmasChallengeState_v2";
 
-// Cooldown so you don't double-click while leaderboard is moving
+// Cooldown so points aren’t double-clicked while list reorders
 let isPointsCooldown = false;
 
 // -----------------------------
-// Persistence
+// localStorage persistence
 // -----------------------------
 function saveStateToLocal() {
   const localState = {
@@ -72,6 +78,7 @@ function loadStateFromLocal() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const localState = JSON.parse(raw);
+
     if (localState && Array.isArray(localState.teams)) {
       teams = localState.teams;
 
@@ -96,7 +103,7 @@ function loadStateFromLocal() {
 }
 
 // -----------------------------
-// UI Helpers
+// UI helpers
 // -----------------------------
 function updateCurrentChallengeTextOnly() {
   if (!currentChallenge) {
@@ -113,15 +120,16 @@ function updateCurrentChallengeTextOnly() {
 }
 
 // -----------------------------
-// Sync to server
+// Sync to server (real-time)
 // -----------------------------
 function syncToServer() {
   if (!socket || typeof socket.emit !== "function" || socket.disconnected) {
     return;
   }
 
+  // IMPORTANT:
+  // We DO NOT send gameCode from admin. Server owns it.
   const serverState = {
-    gameCode: undefined, // server keeps the real code
     teams,
     leaderboard: [],
     currentChallenge,
@@ -131,7 +139,7 @@ function syncToServer() {
 }
 
 // -----------------------------
-// Rendering
+// Rendering leaderboard
 // -----------------------------
 function renderTeams() {
   const sorted = [...teams].sort((a, b) => {
@@ -188,7 +196,7 @@ function renderTeams() {
 }
 
 // -----------------------------
-// Team management
+// Team management (admin-side)
 // -----------------------------
 function addTeam(name) {
   const trimmed = name.trim();
@@ -215,6 +223,7 @@ function changePoints(teamId, delta) {
   if (!team) return;
 
   team.points += delta;
+
   saveStateToLocal();
   renderTeams();
   syncToServer();
@@ -229,12 +238,11 @@ function changePoints(teamId, delta) {
 // Challenge selection
 // -----------------------------
 function setCurrentChallenge(type) {
-  // Special case: Grandprix starts via server event (audio sync)
+  // Special case: Nisse Grandprix starts via server event
   if (type === "Nisse Grandprix") {
     const audioUrl = prompt(
       "Indsæt lydfilens URL (fx /audio/grandprix/track1.mp3)"
     );
-
     if (!audioUrl) {
       alert("Ingen lyd valgt. Grandprix blev ikke startet.");
       return;
@@ -245,10 +253,10 @@ function setCurrentChallenge(type) {
       startDelayMs: 2000,
     });
 
-    return; // server will broadcast state
+    return; // server will broadcast the object state
   }
 
-  // Normal challenges = just string
+  // Normal challenges: just a string
   currentChallenge = type;
   updateCurrentChallengeTextOnly();
   saveStateToLocal();
@@ -264,7 +272,7 @@ function handleYes() {
     return;
   }
 
-  // If Grandprix and locked with firstBuzz => use server YES
+  // Grandprix YES: award via server when locked
   if (
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix" &&
@@ -275,7 +283,7 @@ function handleYes() {
     return;
   }
 
-  // Otherwise manual award like before
+  // Manual award for other challenges
   if (!selectedTeamId) {
     alert("Klik på et hold i leaderboardet for at vælge vinder.");
     return;
@@ -291,14 +299,13 @@ function handleNo() {
     return;
   }
 
-  // Grandprix NO => resume listening and lock out that team
+  // Grandprix NO: lock out buzzing team + resume
   if (
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix" &&
     currentChallenge.phase === "locked" &&
     currentChallenge.firstBuzz
   ) {
-    // admin can optionally send audioPosition later
     socket.emit("grandprixNo", {});
     return;
   }
@@ -312,7 +319,7 @@ function handleIncomplete() {
     return;
   }
 
-  // Grandprix incomplete => end without points
+  // Grandprix incomplete: ends without points
   if (
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix"
@@ -351,12 +358,10 @@ function handleReset() {
   teamNameInput.focus();
 }
 
-// Start game = ask server to generate new code + clear state
 function handleStartGame() {
   socket.emit("startGame");
 }
 
-// End game logic (same as before)
 function handleEndGame() {
   if (teams.length === 0) {
     alert("Ingen hold endnu.");
@@ -380,8 +385,11 @@ function handleEndGame() {
 // Event listeners
 // -----------------------------
 addTeamBtn.addEventListener("click", () => addTeam(teamNameInput.value));
+
 teamNameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") addTeam(teamNameInput.value);
+  if (event.key === "Enter") {
+    addTeam(teamNameInput.value);
+  }
 });
 
 challengeCards.forEach((card) => {
@@ -394,14 +402,15 @@ challengeCards.forEach((card) => {
 yesBtn.addEventListener("click", handleYes);
 noBtn.addEventListener("click", handleNo);
 incompleteBtn.addEventListener("click", handleIncomplete);
+
 endGameBtn.addEventListener("click", handleEndGame);
 resetBtn.addEventListener("click", handleReset);
 
-// If you add a Start Game button later, it will work
-startGameBtn?.addEventListener("click", handleStartGame);
+// Start game button (YOU ALREADY HAVE IT)
+startGameBtn.addEventListener("click", handleStartGame);
 
 // -----------------------------
-// Socket receive state
+// Receive state from server
 // -----------------------------
 socket.on("connect", () => {
   console.log("Connected to server as admin:", socket.id);
@@ -411,22 +420,25 @@ socket.on("state", (serverState) => {
   console.log("Received state from server:", serverState);
   if (!serverState) return;
 
+  // Show game code in header
   if (serverState.gameCode && gameCodeValueEl) {
-  gameCodeValueEl.textContent = serverState.gameCode;
-}
+    gameCodeValueEl.textContent = serverState.gameCode;
+  }
 
-
+  // Mirror teams from server
   if (Array.isArray(serverState.teams)) {
     teams = serverState.teams;
   } else {
     teams = [];
   }
 
+  // Mirror current challenge (string or object)
   currentChallenge =
     serverState.currentChallenge === undefined
       ? null
       : serverState.currentChallenge;
 
+  // Rebuild nextTeamId
   const maxId = teams.reduce(
     (max, t) => Math.max(max, t.id || 0),
     0
@@ -445,4 +457,3 @@ loadStateFromLocal();
 renderTeams();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-
