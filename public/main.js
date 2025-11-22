@@ -46,14 +46,14 @@ function makeInitialDeck() {
       id: 1,
       type: "Nisse Grandprix",
       title: "Grandprix 1",
-      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
+      audioUrl: "PASTE_SUPABASE_URL_1",
       used: false,
     },
     {
       id: 2,
       type: "Nisse Grandprix",
       title: "Grandprix 2",
-      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/SorenBanjo.mp3",
+      audioUrl: "PASTE_SUPABASE_URL_2",
       used: false,
     },
     { id: 3, type: "FiNisse", title: "FiNisse – Juletrøje", used: false },
@@ -100,6 +100,11 @@ function syncToServer() {
     currentChallenge,
     challengeDeck,
   });
+}
+
+// ✅ Stop GP audio on ALL teams immediately
+function stopGrandprixAudioNow() {
+  socket.emit("gp-stop-audio-now");
 }
 
 // Render leaderboard
@@ -226,14 +231,12 @@ let gpAdminPC = null;
 let gpBuzzingTeamId = null;
 
 function stopGrandprixMic() {
-  // tell team to stop mic
   if (gpBuzzingTeamId) {
     socket.emit("gp-stop-mic", { toTeamId: gpBuzzingTeamId });
   }
 
   gpBuzzingTeamId = null;
 
-  // close admin PC + clear audio element
   if (gpAdminPC) {
     try { gpAdminPC.close(); } catch {}
     gpAdminPC = null;
@@ -245,6 +248,8 @@ function stopGrandprixMic() {
 
 // Decision buttons
 function handleYes() {
+  stopGrandprixAudioNow();  // ✅ instant audio stop
+
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
   if (
@@ -265,6 +270,8 @@ function handleYes() {
 }
 
 function handleNo() {
+  stopGrandprixAudioNow();  // ✅ stop immediately, then resume if NO
+
   if (
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix"
@@ -278,6 +285,8 @@ function handleNo() {
 }
 
 function handleIncomplete() {
+  stopGrandprixAudioNow();  // ✅ instant stop
+
   if (!currentChallenge) return;
 
   if (
@@ -296,6 +305,8 @@ function handleIncomplete() {
 
 // Reset / Start / End
 function handleReset() {
+  stopGrandprixAudioNow();  // ✅ instant stop
+
   if (!confirm("Nulstil alle hold + point?")) return;
 
   teams = [];
@@ -324,6 +335,8 @@ function handleStartGame() {
 }
 
 function handleEndGame() {
+  stopGrandprixAudioNow();  // ✅ instant stop
+
   if (teams.length === 0) {
     alert("Ingen hold endnu.");
     return;
@@ -341,7 +354,7 @@ function handleEndGame() {
       `Uafgjort mellem: ${winners.map(w => w.name).join(", ")} (${topScore} point).`;
   }
 
-  // ✅ FULL RESET right after showing winner
+  // FULL RESET after showing winners
   teams = [];
   nextTeamId = 1;
   selectedTeamId = null;
@@ -353,11 +366,9 @@ function handleEndGame() {
   renderDeck();
   updateCurrentChallengeTextOnly();
 
-  // Reset on server + send fresh deck
   socket.emit("startGame");
   socket.emit("setDeck", challengeDeck);
 }
-
 
 // Countdown on admin
 let gpAdminTimer = null;
@@ -365,7 +376,6 @@ function startAdminCountdown(startAtMs, seconds) {
   if (!gpCountdownEl) return;
   if (gpAdminTimer) clearInterval(gpAdminTimer);
 
-  // make sure it's visible in the row
   gpCountdownEl.style.display = "block";
 
   function tick() {
@@ -492,5 +502,3 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-
-
