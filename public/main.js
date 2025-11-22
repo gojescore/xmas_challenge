@@ -46,13 +46,14 @@ function makeInitialDeck() {
       id: 1,
       type: "Nisse Grandprix",
       title: "Grandprix 1",
-      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/SorenBanjo.mp3",
+      audioUrl: "PASTE_SUPABASE_URL_1",
       used: false,
     },
     {
       id: 2,
       type: "Nisse Grandprix",
-      title: "Grahttps://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
+      title: "Grandprix 2",
+      audioUrl: "PASTE_SUPABASE_URL_2",
       used: false,
     },
     { id: 3, type: "FiNisse", title: "FiNisse – Juletrøje", used: false },
@@ -85,12 +86,10 @@ function updateCurrentChallengeTextOnly() {
     currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
     return;
   }
-
   if (typeof currentChallenge === "string") {
     currentChallengeText.textContent = `Aktuel udfordring: ${currentChallenge}`;
   } else {
-    const type = currentChallenge.type;
-    currentChallengeText.textContent = `Aktuel udfordring: ${type}`;
+    currentChallengeText.textContent = `Aktuel udfordring: ${currentChallenge.type}`;
   }
 }
 
@@ -222,6 +221,28 @@ function markLocalDeckUsed(id) {
   syncToServer();
 }
 
+// ---- Grandprix mic cleanup on admin ----
+let gpAdminPC = null;
+let gpBuzzingTeamId = null;
+
+function stopGrandprixMic() {
+  // tell team to stop mic
+  if (gpBuzzingTeamId) {
+    socket.emit("gp-stop-mic", { toTeamId: gpBuzzingTeamId });
+  }
+
+  gpBuzzingTeamId = null;
+
+  // close admin PC + clear audio element
+  if (gpAdminPC) {
+    try { gpAdminPC.close(); } catch {}
+    gpAdminPC = null;
+  }
+  if (gpRemoteAudio) {
+    gpRemoteAudio.srcObject = null;
+  }
+}
+
 // Decision buttons
 function handleYes() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
@@ -230,6 +251,7 @@ function handleYes() {
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix"
   ) {
+    stopGrandprixMic();
     socket.emit("grandprixYes");
     return;
   }
@@ -247,6 +269,7 @@ function handleNo() {
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix"
   ) {
+    stopGrandprixMic();
     socket.emit("grandprixNo");
     return;
   }
@@ -261,6 +284,7 @@ function handleIncomplete() {
     typeof currentChallenge === "object" &&
     currentChallenge.type === "Nisse Grandprix"
   ) {
+    stopGrandprixMic();
     socket.emit("grandprixIncomplete");
     return;
   }
@@ -290,18 +314,14 @@ function handleReset() {
 }
 
 function handleStartGame() {
-  // Reset local deck "used" flags
+  // Reset local deck flags
   challengeDeck = challengeDeck.map(c => ({ ...c, used: false }));
   saveStateToLocal();
   renderDeck();
 
-  // Start new game on server
   socket.emit("startGame");
-
-  // Re-send deck to server (important if server deck was empty)
   socket.emit("setDeck", challengeDeck);
 }
-
 
 function handleEndGame() {
   if (teams.length === 0) return alert("Ingen hold endnu.");
@@ -325,6 +345,9 @@ function startAdminCountdown(startAtMs, seconds) {
   if (!gpCountdownEl) return;
   if (gpAdminTimer) clearInterval(gpAdminTimer);
 
+  // make sure it's visible in the row
+  gpCountdownEl.style.display = "block";
+
   function tick() {
     const now = Date.now();
     const elapsed = Math.floor((now - startAtMs) / 1000);
@@ -337,9 +360,6 @@ function startAdminCountdown(startAtMs, seconds) {
 }
 
 // WebRTC (admin hears mic)
-let gpAdminPC = null;
-let gpBuzzingTeamId = null;
-
 socket.on("gp-webrtc-offer", async ({ fromTeamId, offer }) => {
   gpBuzzingTeamId = fromTeamId;
 
@@ -396,11 +416,11 @@ socket.on("state", (s) => {
   if (Array.isArray(s.challengeDeck)) {
     challengeDeck = s.challengeDeck;
   }
-// If server has no deck (e.g. after restart), push ours up again
-if (!challengeDeck.length) {
-  challengeDeck = makeInitialDeck();
-  socket.emit("setDeck", challengeDeck);
-}
+
+  if (!challengeDeck.length) {
+    challengeDeck = makeInitialDeck();
+    socket.emit("setDeck", challengeDeck);
+  }
 
   const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
   nextTeamId = maxId + 1;
@@ -417,6 +437,7 @@ if (!challengeDeck.length) {
     startAdminCountdown(ch.countdownStartAt, ch.countdownSeconds || 5);
   } else if (gpCountdownEl) {
     gpCountdownEl.textContent = "";
+    gpCountdownEl.style.display = "none";
   }
 
   saveStateToLocal();
@@ -451,5 +472,3 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-
-
