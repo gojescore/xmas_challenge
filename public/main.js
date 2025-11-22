@@ -1,5 +1,4 @@
-// public/main.js  (MODULE version)
-// Uses prefix IDs and imports challenge sets from /public/data/deck/
+// public/main.js (MODULE Version A)
 
 import { grandprixDeck } from "./data/deck/grandprix.js";
 import { nisseGaaden } from "./data/deck/nissegaaden.js";
@@ -10,7 +9,7 @@ const socket = (typeof io !== "undefined") ? io() : {
   disconnected: true
 };
 
-// ---------------- DOM ----------------
+// DOM
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
@@ -29,7 +28,7 @@ const resetBtn = document.getElementById("resetBtn");
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// Countdown on main (we create it next to "ikke fuldført")
+// Countdown element on main (to right of "ikke fuldført")
 let mainCountdownEl = null;
 function ensureMainCountdownEl() {
   if (mainCountdownEl) return mainCountdownEl;
@@ -44,38 +43,29 @@ function ensureMainCountdownEl() {
   return mainCountdownEl;
 }
 
-// ---------------- STATE ----------------
+// STATE
 let teams = [];
 let selectedTeamId = null;
 let currentChallenge = null;
 let deck = makeInitialDeck();
 let gameCode = null;
 
-// cooldown for +/- points
 let isPointsCooldown = false;
+const STORAGE_KEY = "xmasChallengeState_v4";
 
-// local backup
-const STORAGE_KEY = "xmasChallengeState_v3_prefix";
-
+// Build initial deck from imported sets
 function makeInitialDeck() {
   return [
     ...grandprixDeck,
     ...nisseGaaden,
-    // later:
-    // ...fiNisseSet,
-    // ...juleKortSet,
-    // ...udfordringerSet,
   ].map(c => ({ ...c, used: !!c.used }));
 }
 
-// ---------------- Persistence ----------------
+// Local persistence
 function saveLocal() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      teams,
-      deck,
-      currentChallenge,
-      gameCode
+      teams, deck, currentChallenge, gameCode
     }));
   } catch {}
 }
@@ -92,20 +82,13 @@ function loadLocal() {
   } catch {}
 }
 
-// ---------------- Server sync ----------------
+// Sync to server
 function syncToServer() {
   if (!socket || socket.disconnected) return;
-
-  const serverState = {
-    gameCode,
-    teams,
-    deck,
-    currentChallenge
-  };
-  socket.emit("updateState", serverState);
+  socket.emit("updateState", { gameCode, teams, deck, currentChallenge });
 }
 
-// ---------------- Rendering ----------------
+// Render teams
 function renderTeams() {
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
@@ -117,7 +100,6 @@ function renderTeams() {
   sorted.forEach(team => {
     const li = document.createElement("li");
     li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
-    li.dataset.id = team.id;
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "team-name";
@@ -131,30 +113,22 @@ function renderTeams() {
 
     const plusBtn = document.createElement("button");
     plusBtn.textContent = "+";
-    plusBtn.onclick = (e) => {
-      e.stopPropagation();
-      changePoints(team.id, 1);
-    };
+    plusBtn.onclick = (e) => { e.stopPropagation(); changePoints(team.id, 1); };
 
     const minusBtn = document.createElement("button");
     minusBtn.textContent = "−";
-    minusBtn.onclick = (e) => {
-      e.stopPropagation();
-      changePoints(team.id, -1);
-    };
+    minusBtn.onclick = (e) => { e.stopPropagation(); changePoints(team.id, -1); };
 
     pointsDiv.append(minusBtn, pointsValue, plusBtn);
     li.append(nameSpan, pointsDiv);
 
-    li.onclick = () => {
-      selectedTeamId = team.id;
-      renderTeams();
-    };
+    li.onclick = () => { selectedTeamId = team.id; renderTeams(); };
 
     teamListEl.appendChild(li);
   });
 }
 
+// Render deck boxes
 function renderDeck() {
   if (!challengeGridEl) return;
   challengeGridEl.innerHTML = "";
@@ -162,8 +136,6 @@ function renderDeck() {
   deck.forEach(card => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
-    btn.dataset.id = card.id;
-    btn.dataset.type = card.type;
     btn.textContent = card.title || card.type;
 
     if (card.used) {
@@ -172,10 +144,7 @@ function renderDeck() {
     }
 
     btn.onclick = () => {
-      if (card.used) {
-        alert("Denne udfordring er allerede brugt.");
-        return;
-      }
+      if (card.used) return alert("Denne udfordring er allerede brugt.");
       setCurrentChallenge(card);
     };
 
@@ -183,6 +152,8 @@ function renderDeck() {
   });
 }
 
+// Render current challenge text + countdown on main
+let mainCountdownTimer = null;
 function renderCurrentChallenge() {
   if (!currentChallenge) {
     currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
@@ -193,25 +164,18 @@ function renderCurrentChallenge() {
   currentChallengeText.textContent =
     `Aktuel udfordring: ${currentChallenge.title || currentChallenge.type}`;
 
-  // show countdown if grandprix is locked and timer exists
   if (
     currentChallenge.type === "Nisse Grandprix" &&
     currentChallenge.phase === "locked" &&
     currentChallenge.countdownStartAt
   ) {
     showMainCountdown(currentChallenge.countdownStartAt, currentChallenge.countdownSeconds || 5);
-  } else {
-    hideMainCountdown();
-  }
+  } else hideMainCountdown();
 }
-
-// ---------------- Countdown on main ----------------
-let mainCountdownTimer = null;
 
 function showMainCountdown(startAtMs, seconds) {
   ensureMainCountdownEl();
   mainCountdownEl.style.display = "inline-block";
-
   if (mainCountdownTimer) clearInterval(mainCountdownTimer);
 
   const tick = () => {
@@ -219,6 +183,7 @@ function showMainCountdown(startAtMs, seconds) {
     const elapsed = Math.floor((now - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     mainCountdownEl.textContent = left;
+
     if (left <= 0) {
       clearInterval(mainCountdownTimer);
       mainCountdownTimer = null;
@@ -236,21 +201,19 @@ function hideMainCountdown() {
   if (mainCountdownEl) mainCountdownEl.style.display = "none";
 }
 
-// ---------------- Team & points ----------------
+// Team management
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
 
-  const exists = teams.some(t => t.name.toLowerCase() === trimmed.toLowerCase());
-  if (exists) {
-    alert("Holdnavnet findes allerede. Vælg et nyt.");
-    return;
+  if (teams.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
+    return alert("Holdnavnet findes allerede.");
   }
 
   teams.push({
     id: "t" + (crypto?.randomUUID?.() || Date.now()),
     name: trimmed,
-    points: 0
+    points: 0,
   });
 
   selectedTeamId = null;
@@ -276,16 +239,14 @@ function changePoints(teamId, delta) {
   setTimeout(() => isPointsCooldown = false, 400);
 }
 
-// ---------------- Challenge selection ----------------
+// Selecting a challenge
 function setCurrentChallenge(card) {
-  // create payload
   if (card.type === "Nisse Grandprix") {
     const startDelayMs = 3000;
     currentChallenge = {
       ...card,
       phase: "listening",
       startAt: Date.now() + startDelayMs,
-      audioPosition: 0,
       firstBuzz: null,
       countdownSeconds: 5
     };
@@ -298,31 +259,27 @@ function setCurrentChallenge(card) {
   syncToServer();
 }
 
-// ---------------- Decisions ----------------
+// Mark current card used
 function markCurrentUsed() {
   if (!currentChallenge) return;
   const idx = deck.findIndex(c => c.id === currentChallenge.id);
   if (idx >= 0) deck[idx].used = true;
 }
 
+// End current challenge safely
 function endCurrentChallenge() {
   if (!currentChallenge) return;
   if (currentChallenge.type === "Nisse Grandprix") {
-    currentChallenge.phase = "ended"; // teams stop audio automatically
+    currentChallenge.phase = "ended";
   } else {
     currentChallenge = null;
   }
 }
 
+// Decision buttons
 function handleYes() {
-  if (!currentChallenge) {
-    alert("Vælg en udfordring først.");
-    return;
-  }
-  if (!selectedTeamId) {
-    alert("Klik på et hold i leaderboardet for at vælge vinder.");
-    return;
-  }
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
   changePoints(selectedTeamId, 1);
   markCurrentUsed();
@@ -335,12 +292,9 @@ function handleYes() {
 }
 
 function handleNo() {
-  if (!currentChallenge) {
-    alert("Vælg en udfordring først.");
-    return;
-  }
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  markCurrentUsed(); // still counts as used
+  markCurrentUsed();
   endCurrentChallenge();
 
   renderDeck();
@@ -350,12 +304,9 @@ function handleNo() {
 }
 
 function handleIncomplete() {
-  if (!currentChallenge) {
-    alert("Vælg en udfordring først.");
-    return;
-  }
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  markCurrentUsed(); // still counts as used
+  markCurrentUsed();
   endCurrentChallenge();
 
   renderDeck();
@@ -364,7 +315,7 @@ function handleIncomplete() {
   syncToServer();
 }
 
-// ---------------- Reset / End game ----------------
+// Reset everything
 function handleReset() {
   const sure = confirm("Nulstil hele spillet? (hold, point og udfordringer)");
   if (!sure) return;
@@ -385,35 +336,27 @@ function handleReset() {
   teamNameInput.focus();
 }
 
+// End game (does NOT wipe; just shows winner)
 function handleEndGame() {
-  if (!teams.length) {
-    alert("Ingen hold endnu.");
-    return;
-  }
+  if (!teams.length) return alert("Ingen hold endnu.");
 
   const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
   const topScore = sorted[0].points ?? 0;
   const winners = sorted.filter(t => (t.points ?? 0) === topScore);
 
-  if (winners.length === 1) {
-    endGameResultEl.textContent =
-      `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`;
-  } else {
-    endGameResultEl.textContent =
-      `Uafgjort mellem: ${winners.map(t => t.name).join(", ")} (${topScore} point)`;
-  }
+  endGameResultEl.textContent =
+    winners.length === 1
+      ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
+      : `Uafgjort mellem: ${winners.map(t => t.name).join(", ")} (${topScore} point)`;
 
-  // also stop any Grandprix audio
   if (currentChallenge?.type === "Nisse Grandprix") {
     currentChallenge.phase = "ended";
     syncToServer();
   }
 }
 
-// ---------------- Start Game (code) ----------------
+// Start game (server is truth — no local fallback)
 function handleStartGame() {
-  // Don’t generate local codes anymore.
-  // Trust the server so we never get double codes.
   startGameBtn.disabled = true;
 
   socket.emit("startGame", (res) => {
@@ -426,8 +369,8 @@ function handleStartGame() {
     gameCode = res.gameCode;
     if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
 
-    if (res.state?.teams) teams = res.state.teams;
-    if (res.state?.deck) deck = res.state.deck;
+    // keep local deck unless server sent one
+    if (res.state?.deck && Array.isArray(res.state.deck)) deck = res.state.deck;
 
     currentChallenge = null;
 
@@ -439,18 +382,7 @@ function handleStartGame() {
   });
 }
 
-
-  // Fallback if server doesn't ack
-  setTimeout(() => {
-    if (didAck) return;
-    gameCode = String(Math.floor(1000 + Math.random() * 9000));
-    if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
-    saveLocal();
-    syncToServer();
-  }, 300);
-}
-
-// ---------------- Event listeners ----------------
+// Listeners
 addTeamBtn?.addEventListener("click", () => addTeam(teamNameInput.value));
 teamNameInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addTeam(teamNameInput.value);
@@ -464,18 +396,18 @@ resetBtn?.addEventListener("click", handleReset);
 endGameBtn?.addEventListener("click", handleEndGame);
 startGameBtn?.addEventListener("click", handleStartGame);
 
-// ---------------- Socket events ----------------
-socket.on("state", (serverState) => {
-  if (!serverState) return;
+// Server state
+socket.on("state", (s) => {
+  if (!s) return;
 
-  if (serverState.gameCode) {
-    gameCode = serverState.gameCode;
+  if (s.gameCode) {
+    gameCode = s.gameCode;
     if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
   }
 
-  if (Array.isArray(serverState.teams)) teams = serverState.teams;
-  if (Array.isArray(serverState.deck)) deck = serverState.deck;
-  currentChallenge = serverState.currentChallenge || null;
+  if (Array.isArray(s.teams)) teams = s.teams;
+  if (Array.isArray(s.deck)) deck = s.deck;
+  currentChallenge = s.currentChallenge || null;
 
   saveLocal();
   renderTeams();
@@ -484,7 +416,6 @@ socket.on("state", (serverState) => {
 });
 
 socket.on("buzzed", (teamName) => {
-  // helpful: auto-select buzzing team on admin
   const t = teams.find(x => x.name === teamName);
   if (t) {
     selectedTeamId = t.id;
@@ -492,11 +423,10 @@ socket.on("buzzed", (teamName) => {
   }
 });
 
-// ---------------- Init ----------------
+// Init
 loadLocal();
 renderTeams();
 renderDeck();
 renderCurrentChallenge();
 teamNameInput?.focus();
 if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
-
