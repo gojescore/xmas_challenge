@@ -324,7 +324,10 @@ function handleStartGame() {
 }
 
 function handleEndGame() {
-  if (teams.length === 0) return alert("Ingen hold endnu.");
+  if (teams.length === 0) {
+    alert("Ingen hold endnu.");
+    return;
+  }
 
   const sorted = [...teams].sort((a, b) => b.points - a.points);
   const topScore = sorted[0].points;
@@ -337,7 +340,24 @@ function handleEndGame() {
     endGameResultEl.textContent =
       `Uafgjort mellem: ${winners.map(w => w.name).join(", ")} (${topScore} point).`;
   }
+
+  // ✅ FULL RESET right after showing winner
+  teams = [];
+  nextTeamId = 1;
+  selectedTeamId = null;
+  currentChallenge = null;
+
+  challengeDeck = challengeDeck.map(c => ({ ...c, used: false }));
+  saveStateToLocal();
+  renderTeams();
+  renderDeck();
+  updateCurrentChallengeTextOnly();
+
+  // Reset on server + send fresh deck
+  socket.emit("startGame");
+  socket.emit("setDeck", challengeDeck);
 }
+
 
 // Countdown on admin
 let gpAdminTimer = null;
@@ -472,4 +492,5 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+
 
