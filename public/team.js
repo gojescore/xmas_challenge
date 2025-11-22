@@ -1,10 +1,12 @@
-// public/team.js (v25)
-// - Grandprix stable (phase-aware, popup + typing for buzzing team)
-// - NisseGåden big-text mode handled INSIDE minigame
-// - Team can answer NisseGåden via text input
+// public/team.js (v26)
+// Router for team screens.
+// - Grandprix stable
+// - NisseGåden stable + big text handled inside minigame
+// - JuleKortet added (2 min writing + anonymous voting)
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
+import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -20,10 +22,13 @@ const joinSection = el("joinSection");
 
 const codeDisplay = el("codeDisplay");
 const teamListEl = el("teamList");
+
 const challengeTitle = el("challengeTitle");
 const challengeText = el("challengeText");
+
 const buzzBtn = el("buzzBtn");
 const statusEl = el("status");
+
 const teamNameLabel = el("teamNameLabel");
 
 // Grandprix popup elements (must exist in team.html)
@@ -104,7 +109,7 @@ function tryJoin() {
 }
 
 // ===========================
-// BUZZ (also retries audio if autoplay blocked)
+// BUZZ (Grandprix)
 // ===========================
 buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
@@ -120,7 +125,7 @@ buzzBtn?.addEventListener("click", async () => {
   socket.emit("buzz", { audioPosition });
 });
 
-// stop audio forced
+// stop audio forced (admin pressed yes/no/etc)
 socket.on("gp-stop-audio-now", () => {
   stopGrandprix();
   api.clearMiniGame();
@@ -150,7 +155,7 @@ function renderLeaderboard(teams) {
 }
 
 // ===========================
-// NISSEGÅDEN answer (small box under text)
+// NISSEGÅDEN answer (small input under riddle)
 // ===========================
 let ngWrap = null, ngInput = null, ngBtn = null;
 
@@ -303,17 +308,18 @@ function hideGrandprixPopup() {
 }
 
 // ===========================
-// Challenge render
+// Challenge render (router)
 // ===========================
 function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
-  // ✅ always let minigames clean up their own UI modes
+  // ✅ minigames clean themselves
   stopNisseGaaden(api);
+  stopJuleKortet(api);
+  stopGrandprix();
 
   if (!ch) {
-    stopGrandprix();
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
@@ -329,13 +335,16 @@ function renderChallenge(ch) {
   }
 
   if (ch.type === "NisseGåden") {
-    stopGrandprix();
-    renderNisseGaaden(ch, api);   // ✅ minigame enables big-text mode
+    renderNisseGaaden(ch, api);
     showNisseGaadenAnswer();
     return;
   }
 
-  stopGrandprix();
+  if (ch.type === "JuleKortet") {
+    renderJuleKortet(ch, api);
+    return;
+  }
+
   api.clearMiniGame();
 }
 
