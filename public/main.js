@@ -1,10 +1,11 @@
-// public/main.js v26
-// Stable admin controller for Xmas Challenge.
-// Works with:
-// - server.js (joinGame, submitCard, vote, gp-typed-answer, gp-stop-audio-now)
-// - team.js v28 router
-// - minigames: grandprix.js, nissegaaden.js, julekortet.js
-// - decks: data/deck/*.js
+// public/main.js v29
+// FULL stable admin controller.
+// Fixes:
+// - buzzed handler matches server signature (one argument)
+// - Grandprix lock + 20s countdown + typed answer
+// - NisseGåden answers arrive to admin
+// - JuleKortet writing + voting
+// - Stop GP audio on yes/no/incomplete/reset/end
 
 const socket = io();
 
@@ -35,7 +36,7 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v26";
+const STORAGE_KEY = "xmasChallenge_admin_v29";
 
 // ---------------- Persistence ----------------
 function saveLocal() {
@@ -131,7 +132,7 @@ function renderDeck() {
         currentChallenge = {
           ...card,
           phase: "listening",
-          startAt: Date.now() + 3000, // 3s sync buffer
+          startAt: Date.now() + 3000,     // 3s sync buffer
           firstBuzz: null,
           countdownSeconds: 20,
           countdownStartAt: null,
@@ -152,7 +153,7 @@ function renderDeck() {
       else if (card.type === "NisseGåden") {
         currentChallenge = {
           ...card,
-          answers: [] // admin-only list
+          answers: []
         };
       } 
       else {
@@ -235,6 +236,7 @@ function renderCurrentChallenge() {
 
 // ---------------- Admin minigame area ----------------
 let jkAdminTimer = null;
+let gpAdminTimer = null;
 
 function renderMiniGameArea() {
   if (!miniGameArea) return;
@@ -242,7 +244,7 @@ function renderMiniGameArea() {
 
   if (!currentChallenge) return;
 
-  // ---------- GRANDPRIX ADMIN VIEW ----------
+  // ---------- GRANDPRIX ADMIN ----------
   if (currentChallenge.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
     wrap.style.cssText =
@@ -257,27 +259,25 @@ function renderMiniGameArea() {
     `;
 
     miniGameArea.appendChild(wrap);
-
     startAdminGpCountdownIfLocked();
     return;
   }
 
-  // ---------- NISSEGÅDEN ADMIN VIEW ----------
+  // ---------- NISSEGÅDEN ADMIN ----------
   if (currentChallenge.type === "NisseGåden") {
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
-    const answers = currentChallenge.answers || [];
-
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
 
+    const answers = currentChallenge.answers || [];
     if (!answers.length) {
       const p = document.createElement("p");
       p.textContent = "Ingen svar endnu…";
       wrap.appendChild(p);
     } else {
-      answers.forEach((a, i) => {
+      answers.forEach((a) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:6px; background:#fff;";
@@ -293,7 +293,7 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- JULEKORTET ADMIN VIEW ----------
+  // ---------- JULEKORTET ADMIN ----------
   if (currentChallenge.type === "JuleKortet") {
     const ch = currentChallenge;
 
@@ -301,9 +301,7 @@ function renderMiniGameArea() {
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
-    const h = document.createElement("h3");
-    h.textContent = `JuleKortet – fase: ${ch.phase}`;
-    wrap.appendChild(h);
+    wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "writing") {
       const p = document.createElement("p");
@@ -314,7 +312,7 @@ function renderMiniGameArea() {
       const forceBtn = document.createElement("button");
       forceBtn.textContent = "Stop skrivning → start afstemning";
       forceBtn.className = "challenge-card";
-      forceBtn.onclick = () => startVotingPhase();
+      forceBtn.onclick = startVotingPhase;
       wrap.appendChild(forceBtn);
     }
 
@@ -337,7 +335,7 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Afslut afstemning og find vinder";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = () => finishVotingAndAward();
+      finishBtn.onclick = finishVotingAndAward;
       wrap.appendChild(finishBtn);
     }
 
@@ -345,7 +343,7 @@ function renderMiniGameArea() {
   }
 }
 
-// ---------------- Julekortet helpers ----------------
+// ---------------- JuleKortet helpers ----------------
 function startAdminWritingTimer() {
   clearInterval(jkAdminTimer);
   jkAdminTimer = setInterval(() => {
@@ -401,36 +399,15 @@ function finishVotingAndAward() {
     return;
   }
 
-  const winningIndex = winners[0];
+  alert("Vinder fundet automatisk – vælg det hold der skrev kortet og tryk Ja.");
+  ch.phase = "ended";
 
-  socket.emit(
-    "jk-request-winner-team",
-    { challengeId: ch.id, cardIndex: winningIndex },
-    (res) => {
-      if (!res?.ok) {
-        alert("Kunne ikke finde vinderhold. Vælg manuelt.");
-        return;
-      }
-
-      const winnerTeam = teams.find(t => t.name === res.teamName);
-      if (winnerTeam) {
-        winnerTeam.points = (winnerTeam.points ?? 0) + 1;
-        alert(`Vinder: ${winnerTeam.name}! (+1 point)`);
-      }
-
-      ch.phase = "ended";
-      renderTeams();
-      renderMiniGameArea();
-      renderCurrentChallenge();
-      saveLocal();
-      syncToServer();
-    }
-  );
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
 }
 
 // ---------------- Grandprix countdown on admin ----------------
-let gpAdminTimer = null;
-
 function startAdminGpCountdownIfLocked() {
   clearInterval(gpAdminTimer);
 
@@ -443,7 +420,6 @@ function startAdminGpCountdownIfLocked() {
     const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
     const elc = document.getElementById("gpAdminCountdown");
     if (elc) elc.textContent = left;
-
     if (left <= 0) clearInterval(gpAdminTimer);
   }, 200);
 }
@@ -451,6 +427,9 @@ function startAdminGpCountdownIfLocked() {
 // ---------------- Stop GP audio everywhere ----------------
 function stopGpAudioEverywhere() {
   socket.emit("gp-stop-audio-now");
+  if (currentChallenge?.type === "Nisse Grandprix") {
+    currentChallenge.phase = "ended";
+  }
 }
 
 // ---------------- Decision buttons ----------------
@@ -475,8 +454,6 @@ yesBtn.onclick = () => {
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   stopGpAudioEverywhere();
-
-  renderCurrentChallenge();
   renderMiniGameArea();
   saveLocal();
   syncToServer();
@@ -485,8 +462,6 @@ noBtn.onclick = () => {
 incompleteBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   stopGpAudioEverywhere();
-
-  renderCurrentChallenge();
   renderMiniGameArea();
   saveLocal();
   syncToServer();
@@ -537,7 +512,7 @@ startGameBtn.onclick = () => {
   syncToServer();
 };
 
-// ---------------- Add team manually (optional) ----------------
+// ---------------- Add team manually ----------------
 addTeamBtn.onclick = () => {
   const name = teamNameInput.value.trim();
   if (!name) return;
@@ -561,17 +536,18 @@ addTeamBtn.onclick = () => {
 
 // ---------------- SOCKET LISTENERS ----------------
 
-// When team buzzes first
-socket.on("buzzed", (teamName, payload) => {
+// Server emits: io.emit("buzzed", socket.team)
+// so handler receives ONLY teamName:
+socket.on("buzzed", (teamName) => {
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
   if (currentChallenge.phase !== "listening") return;
   if (currentChallenge.firstBuzz) return;
 
   currentChallenge.phase = "locked";
-  currentChallenge.firstBuzz = { teamName, audioPosition: payload?.audioPosition ?? null };
+  currentChallenge.firstBuzz = { teamName };
   currentChallenge.countdownStartAt = Date.now();
+  currentChallenge.typedAnswer = null;
 
-  // highlight winner candidate
   const t = teams.find(x => x.name === teamName);
   if (t) selectedTeamId = t.id;
 
@@ -581,41 +557,53 @@ socket.on("buzzed", (teamName, payload) => {
   syncToServer();
 });
 
-// Receive NisseGåden answers (team -> admin)
+// NisseGåden + JuleKortet cards
 socket.on("newCard", ({ team, text }) => {
   if (!currentChallenge) return;
-  if (currentChallenge.type !== "NisseGåden") return;
 
-  currentChallenge.answers = currentChallenge.answers || [];
-  currentChallenge.answers.push({ team, text });
+  if (currentChallenge.type === "NisseGåden") {
+    currentChallenge.answers = currentChallenge.answers || [];
+    currentChallenge.answers.push({ team, text });
+  }
+
+  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
+    currentChallenge.cards = currentChallenge.cards || [];
+    currentChallenge.cards.push({ team, text });
+  }
 
   renderMiniGameArea();
   saveLocal();
   syncToServer();
 });
 
-// Receive typed Grandprix answer (buzzed team -> admin)
+// Votes for JuleKortet
+socket.on("voteUpdate", ({ voter, index }) => {
+  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
+  if (currentChallenge.phase !== "voting") return;
+
+  currentChallenge.votes = currentChallenge.votes || {};
+  currentChallenge.votes[voter] = index;
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+// Typed answer from GP first-buzz team
 socket.on("gp-typed-answer", ({ text }) => {
-  if (!currentChallenge) return;
-  if (currentChallenge.type !== "Nisse Grandprix") return;
-
+  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
   currentChallenge.typedAnswer = text;
-
   renderMiniGameArea();
   saveLocal();
   syncToServer();
 });
 
-// Receive full state from server (server is truth)
+// Server state is truth
 socket.on("state", (s) => {
   if (!s) return;
 
   if (Array.isArray(s.teams)) teams = s.teams;
-
-  if (Array.isArray(s.deck)) {
-    if (!(s.deck.length === 0 && deck.length > 0)) deck = s.deck;
-  }
-
+  if (Array.isArray(s.deck)) deck = s.deck;
   currentChallenge = s.currentChallenge || currentChallenge;
   gameCode = s.gameCode || gameCode;
 
@@ -635,7 +623,5 @@ renderTeams();
 renderDeck();
 renderCurrentChallenge();
 renderMiniGameArea();
-
 loadDeckSafely();
-
 if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
