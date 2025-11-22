@@ -1,4 +1,5 @@
-// public/team.js
+// public/team.js (EVENT-SAFE: Grandprix NO mic, teams type answer)
+
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 
 const socket = io();
@@ -28,12 +29,44 @@ const challengeText = el("challengeText");
 
 const buzzBtn = el("buzzBtn");
 const statusEl = el("status");
-
 const teamNameLabel = el("teamNameLabel");
 
 // Grandprix answer popup
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
+
+// NEW: input for typed answer when locked
+let gpAnswerInput = null;
+let gpAnswerBtn = null;
+
+function ensureAnswerUI() {
+  if (gpAnswerInput) return;
+
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-top:12px; display:flex; gap:8px; justify-content:center;";
+
+  gpAnswerInput = document.createElement("input");
+  gpAnswerInput.placeholder = "Skriv jeres svar her…";
+  gpAnswerInput.style.cssText = "font-size:1.1rem; padding:8px; width:260px;";
+
+  gpAnswerBtn = document.createElement("button");
+  gpAnswerBtn.textContent = "Send svar";
+  gpAnswerBtn.style.cssText = "font-size:1.1rem; padding:8px 12px; font-weight:700; cursor:pointer;";
+
+  gpAnswerBtn.onclick = () => {
+    const text = (gpAnswerInput.value || "").trim();
+    if (!text) return;
+    socket.emit("gp-typed-answer", { text });
+    gpAnswerInput.value = "";
+    statusEl.textContent = "✅ Svar sendt til læreren.";
+  };
+
+  wrap.appendChild(gpAnswerInput);
+  wrap.appendChild(gpAnswerBtn);
+
+  // place under buzz button
+  buzzBtn.parentElement.appendChild(wrap);
+}
 
 // STATE
 let joined = false;
@@ -51,6 +84,8 @@ const api = {
   clearMiniGame() {
     if (statusEl) statusEl.textContent = "";
     if (buzzBtn) buzzBtn.disabled = true;
+    if (gpAnswerInput) gpAnswerInput.disabled = true;
+    if (gpAnswerBtn) gpAnswerBtn.disabled = true;
   }
 };
 
@@ -108,6 +143,7 @@ function tryJoinTeam() {
     if (joinSection) joinSection.style.display = "none";
 
     api.clearMiniGame();
+    ensureAnswerUI();
   });
 }
 
@@ -189,8 +225,7 @@ function showGrandprixPopup(startAtMs, seconds) {
   gpPopup.style.display = "flex";
 
   function tick() {
-    const now = Date.now();
-    const elapsed = Math.floor((now - startAtMs) / 1000);
+    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     gpPopupCountdown.textContent = left;
 
@@ -203,57 +238,6 @@ function showGrandprixPopup(startAtMs, seconds) {
   tick();
   gpPopupTimer = setInterval(tick, 100);
 }
-
-// ---- Mic (team -> admin) ----
-let gpTeamPC = null;
-let gpMicStream = null;
-
-async function startMicToAdmin() {
-  try {
-    gpMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    gpTeamPC = new RTCPeerConnection();
-    gpMicStream.getTracks().forEach(track =>
-      gpTeamPC.addTrack(track, gpMicStream)
-    );
-
-    gpTeamPC.onicecandidate = (ev) => {
-      if (ev.candidate) socket.emit("gp-webrtc-ice", { candidate: ev.candidate });
-    };
-
-    const offer = await gpTeamPC.createOffer();
-    await gpTeamPC.setLocalDescription(offer);
-
-    socket.emit("gp-webrtc-offer", { offer });
-  } catch {
-    api.showStatus("⚠️ Mikrofon kræver tilladelse.");
-  }
-}
-
-function stopMicNow() {
-  if (gpMicStream) {
-    gpMicStream.getTracks().forEach(t => { try { t.stop(); } catch {} });
-    gpMicStream = null;
-  }
-  if (gpTeamPC) {
-    try { gpTeamPC.close(); } catch {}
-    gpTeamPC = null;
-  }
-}
-
-socket.on("gp-stop-mic", stopMicNow);
-
-socket.on("gp-webrtc-answer", async ({ answer }) => {
-  try {
-    if (gpTeamPC && answer) await gpTeamPC.setRemoteDescription(answer);
-  } catch {}
-});
-
-socket.on("gp-webrtc-ice", async ({ candidate }) => {
-  try {
-    if (gpTeamPC && candidate) await gpTeamPC.addIceCandidate(candidate);
-  } catch {}
-});
 
 // ---- State from server ----
 socket.on("state", (s) => {
@@ -271,9 +255,16 @@ socket.on("state", (s) => {
     ch.type === "Nisse Grandprix" &&
     ch.phase === "locked";
 
-  if (!isLockedGrandprix) {
-    stopMicNow();
-    if (gpPopup) gpPopup.style.display = "none";
+  // enable typed answer only for buzzing team during lock
+  if (gpAnswerInput && gpAnswerBtn) {
+    const iAmBuzzedFirst =
+      joined &&
+      isLockedGrandprix &&
+      ch.firstBuzz &&
+      ch.firstBuzz.teamName === myTeamName;
+
+    gpAnswerInput.disabled = !iAmBuzzedFirst;
+    gpAnswerBtn.disabled = !iAmBuzzedFirst;
   }
 
   if (
@@ -284,6 +275,7 @@ socket.on("state", (s) => {
     ch.countdownStartAt
   ) {
     showGrandprixPopup(ch.countdownStartAt, ch.countdownSeconds || 5);
-    startMicToAdmin();
+  } else {
+    if (gpPopup) gpPopup.style.display = "none";
   }
 });
