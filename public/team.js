@@ -1,8 +1,8 @@
-// public/team.js v29
-// Fixes typing:
-// - Grandprix popup ALWAYS shows input in locked phase;
-//   only first-buzz team gets it enabled.
-// - JuleKortet textarea never disabled during writing (readOnly after).
+// public/team.js v30
+// Fixes:
+// - Buzzing team always sees correct text + enabled input
+// - One typed GP answer per round per team
+// - JuleKortet: hide after submit; voting shows all; self-vote blocked
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -37,6 +37,10 @@ const gpPopupCountdown = el("grandprixPopupCountdown");
 let joined = false;
 let joinedCode = null;
 let myTeamName = null;
+
+// per-round flags
+let gpAnsweredRoundId = null;
+let gpSentThisRound = false;
 
 // ---------- Mini-game API ----------
 const api = {
@@ -212,44 +216,39 @@ function ensureGpAnswerUI() {
   if (!gpAnswerWrap) {
     gpAnswerWrap = document.createElement("div");
     gpAnswerWrap.style.cssText = `
-      margin-top:18px;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
+      margin-top:18px; display:flex; flex-direction:column; gap:10px;
       width:min(520px, 92vw);
     `;
 
     gpNoteEl = document.createElement("div");
-    gpNoteEl.style.cssText = "font-size:1.1rem; font-weight:700; text-align:center;";
+    gpNoteEl.style.cssText =
+      "font-size:1.1rem; font-weight:700; text-align:center;";
 
     gpAnswerInput = document.createElement("input");
     gpAnswerInput.placeholder = "Skriv jeres svar …";
     gpAnswerInput.style.cssText = `
-      font-size:1.6rem;
-      padding:14px;
-      border-radius:10px;
-      border:2px solid #222;
+      font-size:1.6rem; padding:14px; border-radius:10px; border:2px solid #222;
       width:100%;
     `;
 
     gpAnswerBtn = document.createElement("button");
     gpAnswerBtn.textContent = "Send svar";
     gpAnswerBtn.style.cssText = `
-      font-size:1.5rem;
-      font-weight:900;
-      padding:12px;
-      border-radius:10px;
-      border:none;
-      background:#1a7f37;
-      color:white;
-      cursor:pointer;
+      font-size:1.5rem; font-weight:900; padding:12px; border-radius:10px; border:none;
+      background:#1a7f37; color:white; cursor:pointer;
     `;
 
     gpAnswerBtn.onclick = () => {
+      if (gpSentThisRound) return;
+
       const text = (gpAnswerInput.value || "").trim();
       if (!text) return;
-      socket.emit("gp-typed-answer", { text });
-      gpAnswerInput.value = "";
+
+      gpSentThisRound = true;
+      gpAnswerInput.disabled = true;
+      gpAnswerBtn.disabled = true;
+
+      socket.emit("gp-typed-answer", { teamName: myTeamName, text });
       api.showStatus("✅ Svar sendt til læreren.");
     };
 
@@ -258,19 +257,23 @@ function ensureGpAnswerUI() {
   }
 }
 
-function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz) {
+function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (!gpPopup || !gpPopupCountdown) return;
 
   ensureGpAnswerUI();
-
   gpPopup.style.display = "flex";
 
-  // ALWAYS show inputs, but enable only for first-buzz team
+  // new round => reset local one-answer lock
+  if (roundId && roundId !== gpAnsweredRoundId) {
+    gpAnsweredRoundId = roundId;
+    gpSentThisRound = false;
+  }
+
   if (iAmFirstBuzz) {
     gpNoteEl.textContent = "Svar inden tiden udløber";
-    gpAnswerInput.disabled = false;
-    gpAnswerBtn.disabled = false;
-    setTimeout(() => gpAnswerInput.focus(), 80);
+    gpAnswerInput.disabled = gpSentThisRound;
+    gpAnswerBtn.disabled = gpSentThisRound;
+    if (!gpSentThisRound) setTimeout(() => gpAnswerInput.focus(), 80);
   } else {
     gpNoteEl.textContent = "Vent… et andet hold svarer nu";
     gpAnswerInput.disabled = true;
@@ -338,7 +341,7 @@ function renderChallenge(ch) {
   }
 
   if (ch.type === "JuleKortet") {
-    renderJuleKortet(ch, api, socket);
+    renderJuleKortet(ch, api, socket, myTeamName);
     return;
   }
 
@@ -359,21 +362,22 @@ socket.on("state", (s) => {
   const ch = s.currentChallenge;
 
   const isLockedGP =
-    ch &&
-    ch.type === "Nisse Grandprix" &&
-    ch.phase === "locked";
+    ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
+
+  const normalize = (x) => (x || "").trim().toLowerCase();
 
   const iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
-    ch.firstBuzz.teamName === myTeamName;
+    normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
   if (isLockedGP && ch.countdownStartAt) {
     showGrandprixPopup(
       ch.countdownStartAt,
       ch.countdownSeconds || 20,
-      iAmFirstBuzz
+      iAmFirstBuzz,
+      ch.id
     );
   } else {
     hideGrandprixPopup();
