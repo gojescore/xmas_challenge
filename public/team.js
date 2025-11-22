@@ -3,18 +3,13 @@ import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 
 const socket = io();
 
-// --------------------------
-// Safe element getter
-// --------------------------
 function el(id) {
   const node = document.getElementById(id);
   if (!node) console.warn(`Missing element with id="${id}" in team.html`);
   return node;
 }
 
-// --------------------------
 // DOM
-// --------------------------
 const codeInput = el("codeInput");
 const codeBtn = el("codeBtn");
 
@@ -36,21 +31,16 @@ const statusEl = el("status");
 
 const teamNameLabel = el("teamNameLabel");
 
-
-// Grandprix popup
+// Grandprix answer popup
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
 
-// --------------------------
 // STATE
-// --------------------------
 let joined = false;
 let joinedCode = null;
 let myTeamName = null;
 
-// --------------------------
 // Mini-game API
-// --------------------------
 const api = {
   setBuzzEnabled(enabled) {
     if (buzzBtn) buzzBtn.disabled = !enabled;
@@ -64,9 +54,7 @@ const api = {
   }
 };
 
-// --------------------------
-// JOIN STEP 1: ENTER CODE
-// --------------------------
+// ---- Join step 1: code ----
 if (codeBtn && codeInput) {
   codeBtn.addEventListener("click", tryCode);
   codeInput.addEventListener("keydown", (e) => {
@@ -90,9 +78,7 @@ function tryCode() {
   nameInput?.focus();
 }
 
-// --------------------------
-// JOIN STEP 2: ENTER TEAM NAME
-// --------------------------
+// ---- Join step 2: team name ----
 if (nameBtn && nameInput) {
   nameBtn.addEventListener("click", tryJoinTeam);
   nameInput.addEventListener("keydown", (e) => {
@@ -130,9 +116,7 @@ function tryJoinTeam() {
   });
 }
 
-// --------------------------
-// BUZZ
-// --------------------------
+// ---- Buzz ----
 if (buzzBtn) {
   buzzBtn.addEventListener("click", () => {
     if (!joined) return;
@@ -150,15 +134,14 @@ socket.on("buzzed", (teamName) => {
   if (statusEl) statusEl.textContent = `${teamName} buzzede først!`;
 });
 
-// ✅ Admin pressed decision/reset/end -> stop GP audio instantly
+// Admin forced stop
 socket.on("gp-stop-audio-now", () => {
   stopGrandprix();
   api.clearMiniGame();
+  if (gpPopup) gpPopup.style.display = "none";
 });
 
-// --------------------------
-// LEADERBOARD RENDER
-// --------------------------
+// ---- Leaderboard ----
 function renderLeaderboard(teams) {
   if (!teamListEl) return;
 
@@ -182,9 +165,7 @@ function renderLeaderboard(teams) {
   });
 }
 
-// --------------------------
-// CHALLENGE RENDER
-// --------------------------
+// ---- Challenge render ----
 function renderChallenge(challenge) {
   if (buzzBtn) buzzBtn.disabled = true;
 
@@ -208,9 +189,7 @@ function renderChallenge(challenge) {
   api.clearMiniGame();
 }
 
-// --------------------------
-// GRANDPRIX POPUP COUNTDOWN
-// --------------------------
+// ---- 5-sec Grandprix answer popup ----
 let gpPopupTimer = null;
 
 function showGrandprixPopup(startAtMs, seconds) {
@@ -237,9 +216,7 @@ function showGrandprixPopup(startAtMs, seconds) {
   gpPopupTimer = setInterval(tick, 100);
 }
 
-// --------------------------
-// GRANDPRIX MIC (TEAM -> ADMIN ONLY)
-// --------------------------
+// ---- Mic (team -> admin) ----
 let gpTeamPC = null;
 let gpMicStream = null;
 
@@ -248,17 +225,16 @@ async function startMicToAdmin() {
     gpMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     gpTeamPC = new RTCPeerConnection();
-    gpMicStream.getTracks().forEach(track => gpTeamPC.addTrack(track, gpMicStream));
+    gpMicStream.getTracks().forEach(track =>
+      gpTeamPC.addTrack(track, gpMicStream)
+    );
 
     gpTeamPC.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        socket.emit("gp-webrtc-ice", { candidate: ev.candidate });
-      }
+      if (ev.candidate) socket.emit("gp-webrtc-ice", { candidate: ev.candidate });
     };
 
     const offer = await gpTeamPC.createOffer();
     await gpTeamPC.setLocalDescription(offer);
-
     socket.emit("gp-webrtc-offer", { offer });
   } catch {
     api.showStatus("⚠️ Mikrofon kræver tilladelse.");
@@ -267,56 +243,40 @@ async function startMicToAdmin() {
 
 function stopMicNow() {
   if (gpMicStream) {
-    gpMicStream.getTracks().forEach(t => {
-      try { t.stop(); } catch {}
-    });
+    gpMicStream.getTracks().forEach(t => { try { t.stop(); } catch {} });
     gpMicStream = null;
   }
-
   if (gpTeamPC) {
     try { gpTeamPC.close(); } catch {}
     gpTeamPC = null;
   }
 }
 
-// Admin tells buzzing team to stop mic
-socket.on("gp-stop-mic", () => {
-  stopMicNow();
-});
+socket.on("gp-stop-mic", stopMicNow);
 
-// WebRTC answer + ICE from admin
 socket.on("gp-webrtc-answer", async ({ answer }) => {
   try {
-    if (gpTeamPC && answer) {
-      await gpTeamPC.setRemoteDescription(answer);
-    }
+    if (gpTeamPC && answer) await gpTeamPC.setRemoteDescription(answer);
   } catch {}
 });
 
 socket.on("gp-webrtc-ice", async ({ candidate }) => {
   try {
-    if (gpTeamPC && candidate) {
-      await gpTeamPC.addIceCandidate(candidate);
-    }
+    if (gpTeamPC && candidate) await gpTeamPC.addIceCandidate(candidate);
   } catch {}
 });
 
-// --------------------------
-// RECEIVE GLOBAL STATE
-// --------------------------
-socket.on("state", (serverState) => {
-  if (!serverState) return;
+// ---- State from server ----
+socket.on("state", (s) => {
+  if (!s) return;
 
-  if (serverState.gameCode && codeDisplay) {
-    codeDisplay.textContent = serverState.gameCode;
-  }
+  if (s.gameCode && codeDisplay) codeDisplay.textContent = s.gameCode;
 
-  renderLeaderboard(serverState.teams || []);
-  renderChallenge(serverState.currentChallenge);
+  renderLeaderboard(s.teams || []);
+  renderChallenge(s.currentChallenge);
 
-  const ch = serverState.currentChallenge;
+  const ch = s.currentChallenge;
 
-  // Auto-cleanup mic if round is no longer locked
   const isLockedGrandprix =
     ch &&
     typeof ch === "object" &&
@@ -328,7 +288,6 @@ socket.on("state", (serverState) => {
     if (gpPopup) gpPopup.style.display = "none";
   }
 
-  // If THIS team buzzed first -> show popup + start mic
   if (
     joined &&
     isLockedGrandprix &&
@@ -340,6 +299,3 @@ socket.on("state", (serverState) => {
     startMicToAdmin();
   }
 });
-
-
-
