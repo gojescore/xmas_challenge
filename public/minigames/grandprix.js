@@ -6,12 +6,34 @@ let loadedUrl = null;
 let startTimer = null;
 let resumeTimer = null;
 let lastPhase = null;
+let audioUnlocked = false;
 
 function clearTimers() {
   if (startTimer) clearTimeout(startTimer);
   if (resumeTimer) clearTimeout(resumeTimer);
   startTimer = null;
   resumeTimer = null;
+}
+
+function unlockAudioOnce(api) {
+  if (audioUnlocked || !audio) return;
+
+  const unlock = async () => {
+    try {
+      // try play + pause inside gesture
+      await audio.play();
+      audio.pause();
+      audioUnlocked = true;
+      api.showStatus("🔊 Lyd aktiveret!");
+    } catch (e) {
+      api.showStatus("⚠️ Tryk én gang mere for at aktivere lyd.");
+    }
+    document.removeEventListener("pointerdown", unlock);
+    document.removeEventListener("keydown", unlock);
+  };
+
+  document.addEventListener("pointerdown", unlock, { once: true });
+  document.addEventListener("keydown", unlock, { once: true });
 }
 
 function ensureAudio(url, api) {
@@ -24,10 +46,13 @@ function ensureAudio(url, api) {
     audio = new Audio(url);
     audio.preload = "auto";
     loadedUrl = url;
+    audioUnlocked = false;
+
     api.showStatus("🎵 Lyd klargøres…");
+    unlockAudioOnce(api);
   }
 
-  // ⭐ expose for buzz timing
+  // expose for buzz timing
   window.__grandprixAudio = audio;
 
   return audio;
@@ -38,18 +63,22 @@ async function safePlay(api) {
   try {
     await audio.play();
   } catch {
-    api.showStatus("🔊 Tryk én gang på skærmen for at aktivere lyd.");
-    const unlock = async () => {
-      document.removeEventListener("click", unlock);
-      try {
-        await audio.play();
-        api.showStatus("🎵 Lyd kører — tryk STOP når I ved svaret!");
-      } catch {
-        api.showStatus("⚠️ Kunne ikke starte lyd. Prøv igen.");
-      }
-    };
-    document.addEventListener("click", unlock, { once: true });
+    // if blocked, set up unlock
+    unlockAudioOnce(api);
+    api.showStatus("🔊 Tryk på skærmen for at starte lyd.");
   }
+}
+
+async function setTimeSafely(t) {
+  if (!audio) return;
+  if (audio.readyState >= 1) {
+    try { audio.currentTime = t; } catch {}
+    return;
+  }
+  await new Promise((resolve) => {
+    audio.addEventListener("loadedmetadata", resolve, { once: true });
+  });
+  try { audio.currentTime = t; } catch {}
 }
 
 function computeStartSeconds(challenge) {
@@ -66,17 +95,10 @@ function scheduleStart(challenge, api) {
   const startAt = challenge.startAt || now;
   const delayMs = Math.max(0, startAt - now);
 
-  if (delayMs < 50) {
-    const t = computeStartSeconds(challenge);
-    try { audio.currentTime = t; } catch {}
-    safePlay(api);
-    return;
-  }
-
   api.showStatus("🎵 Klar… lyt efter musikken!");
-  startTimer = setTimeout(() => {
+  startTimer = setTimeout(async () => {
     const t = computeStartSeconds(challenge);
-    try { audio.currentTime = t; } catch {}
+    await setTimeSafely(t);
     safePlay(api);
   }, delayMs);
 }
@@ -87,13 +109,12 @@ function scheduleResume(challenge, api) {
   const resumeAt = challenge.resumeAt || now;
   const delayMs = Math.max(0, resumeAt - now);
 
-  resumeTimer = setTimeout(() => {
+  api.showStatus("🎵 Musik fortsætter lige om lidt…");
+  resumeTimer = setTimeout(async () => {
     const basePos = Number(challenge.audioPosition || 0);
-    try { audio.currentTime = basePos; } catch {}
+    await setTimeSafely(basePos);
     safePlay(api);
   }, delayMs);
-
-  api.showStatus("🎵 Musik fortsætter lige om lidt…");
 }
 
 function stopAudio(api, msg) {
@@ -122,21 +143,14 @@ export function renderGrandprix(challenge, api) {
       else scheduleStart(challenge, api);
     }
 
-    if (audio && audio.paused && !startTimer && !resumeTimer) {
-      safePlay(api);
-    }
-
     api.showStatus("🎵 Lyt… tryk STOP når I kender svaret!");
   }
-
   else if (phase === "locked") {
     stopAudio(api, "⛔ Et hold har trykket STOP! Vent på læreren…");
   }
-
   else if (phase === "ended") {
     stopAudio(api, "✅ Runden er slut. Vent på næste udfordring.");
   }
-
   else {
     stopAudio(api, "Vent på læreren…");
   }
