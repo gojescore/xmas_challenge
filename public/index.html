@@ -46,16 +46,17 @@
           <p id="currentChallengeText">Ingen udfordring valgt endnu.</p>
 
           <div class="challenge-controls">
-            <button id="yesBtn" class="yes">✔ Ja</button>
-            <button id="noBtn" class="no">✖ Nej</button>
-            <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
-          </div>
+  <button id="yesBtn" class="yes">✔ Ja</button>
+  <button id="noBtn" class="no">✖ Nej</button>
+  <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
 
-          <!-- Countdown + mic audio -->
-          <div id="grandprixAdminRow" style="display:flex; align-items:center; gap:12px; margin-top:8px;">
-            <div id="grandprixCountdown" style="font-size:1.6rem; font-weight:900;"></div>
-            <audio id="grandprixRemoteAudio" autoplay></audio>
-          </div>
+  <!-- countdown sits RIGHT of "Ikke fuldført" -->
+  <div id="grandprixCountdown" class="gp-countdown"></div>
+
+  <!-- admin hears mic here -->
+  <audio id="grandprixRemoteAudio" autoplay></audio>
+</div>
+
 
           <p class="hint">
             Klik på et hold til højre for at markere vinderen, og tryk derefter “Ja”.
@@ -81,3 +82,4 @@
   <script src="main.js?v=7"></script>
 </body>
 </html>
+
