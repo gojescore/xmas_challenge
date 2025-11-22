@@ -8,7 +8,6 @@ const io = require("socket.io")(http);
 // ------------------------------
 app.use(express.static("public"));
 
-// Small root ping
 app.get("/", (req, res) => {
   res.send("Xmas Challenge Server Running");
 });
@@ -53,7 +52,7 @@ io.on("connection", (socket) => {
   socket.emit("state", state);
 
   // --------------------------
-  // Admin: Start game (creates stable code)
+  // Admin: Start game (stable code)
   // --------------------------
   socket.on("startGame", (cb) => {
     if (!state.gameCode) {
@@ -62,7 +61,6 @@ io.on("connection", (socket) => {
       console.log("Game started. Code:", state.gameCode);
       broadcastState();
     }
-
     cb?.({ ok: true, gameCode: state.gameCode, state });
   });
 
@@ -88,13 +86,11 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Unique names only
     if (findTeamByName(cleanName)) {
       cb?.({ ok: false, message: "Teamnavnet er allerede taget." });
       return;
     }
 
-    // Create team
     const team = {
       id: "t" + Date.now() + Math.floor(Math.random() * 9999),
       name: cleanName,
@@ -103,7 +99,6 @@ io.on("connection", (socket) => {
 
     state.teams.push(team);
 
-    // remember on socket
     socket.teamName = team.name;
     socket.teamId = team.id;
 
@@ -120,11 +115,8 @@ io.on("connection", (socket) => {
     const teamName = socket.teamName;
     if (!teamName) return;
 
-    // Broadcast who buzzed (admin uses this)
     io.emit("buzzed", teamName);
 
-    // If current challenge is Grandprix listening,
-    // first buzz locks the round.
     const ch = state.currentChallenge;
 
     if (
@@ -134,8 +126,8 @@ io.on("connection", (socket) => {
       ch.phase === "listening" &&
       !ch.firstBuzz
     ) {
-      const countdownSeconds = ch.countdownSeconds || 5;
       const now = Date.now();
+      const countdownSeconds = ch.countdownSeconds || 5;
 
       state.currentChallenge = {
         ...ch,
@@ -158,7 +150,6 @@ io.on("connection", (socket) => {
   // Admin sends answer/ice → team
   // --------------------------
   socket.on("gp-webrtc-offer", ({ offer }) => {
-    // relay to ALL admins (simplest)
     socket.broadcast.emit("gp-webrtc-offer", {
       teamName: socket.teamName,
       offer,
@@ -166,7 +157,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("gp-webrtc-answer", ({ teamName, answer }) => {
-    // find team socket(s)
     for (const s of io.sockets.sockets.values()) {
       if (s.teamName === teamName) {
         s.emit("gp-webrtc-answer", { answer });
@@ -175,7 +165,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("gp-webrtc-ice", ({ teamName, candidate }) => {
-    // If message came from TEAM (no teamName param), broadcast to admins
     if (!teamName) {
       socket.broadcast.emit("gp-webrtc-ice", {
         teamName: socket.teamName,
@@ -184,7 +173,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // If message came from ADMIN (has teamName), send to that team
     for (const s of io.sockets.sockets.values()) {
       if (s.teamName === teamName) {
         s.emit("gp-webrtc-ice", { candidate });
@@ -199,7 +187,6 @@ io.on("connection", (socket) => {
     const prevChallenge = state.currentChallenge;
     state = newState || state;
 
-    // If admin ended/cleared Grandprix, stop audio + mic on all teams
     const prevWasGP =
       prevChallenge &&
       prevChallenge.type === "Nisse Grandprix" &&
@@ -211,8 +198,8 @@ io.on("connection", (socket) => {
       state.currentChallenge.phase !== "ended";
 
     if (prevWasGP && !nextIsGP) {
-      io.emit("gp-stop-audio-now"); // teams stop audio instantly
-      io.emit("gp-stop-mic");       // buzzing team stops mic
+      io.emit("gp-stop-audio-now");
+      io.emit("gp-stop-mic");
     }
 
     broadcastState();
