@@ -1,19 +1,13 @@
 // public/main.js (Admin)
 
-// -----------------------------
-// SOCKET.IO setup
-// -----------------------------
-let socket = null;
+let socket = io();
 
-if (typeof io !== "undefined") {
-  socket = io();
-} else {
-  socket = { emit: () => {}, on: () => {}, disconnected: true };
-}
+// Register as admin for mic signaling
+socket.on("connect", () => {
+  socket.emit("registerAdmin");
+});
 
-// -----------------------------
-// DOM elements
-// -----------------------------
+// DOM
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
@@ -32,80 +26,51 @@ const resetBtn = document.getElementById("resetBtn");
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// -----------------------------
-// Local state mirror
-// -----------------------------
+const gpCountdownEl = document.getElementById("grandprixCountdown");
+const gpRemoteAudio = document.getElementById("grandprixRemoteAudio");
+
+// Local mirror
 let teams = [];
 let nextTeamId = 1;
 let selectedTeamId = null;
 let currentChallenge = null;
+let challengeDeck = [];
 
-let challengeDeck = []; // NEW: admin deck mirror
-
-const STORAGE_KEY = "xmasChallengeState_v3";
+const STORAGE_KEY = "xmasChallengeState_v7";
 let isPointsCooldown = false;
 
-// -----------------------------
-// Define your deck here
-// Add as many as you want.
-// Duplicate types allowed, each card unique id.
-// -----------------------------
+// INITIAL DECK (edit here)
 function makeInitialDeck() {
   return [
     {
       id: 1,
       type: "Nisse Grandprix",
       title: "Grandprix 1",
-      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/SorenBanjo.mp3",
+      audioUrl: "PASTE_SUPABASE_URL_1",
       used: false,
     },
     {
       id: 2,
       type: "Nisse Grandprix",
       title: "Grandprix 2",
-      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
+      audioUrl: "PASTE_SUPABASE_URL_2",
       used: false,
     },
-    {
-      id: 3,
-      type: "FiNisse",
-      title: "FiNisse – Juletrøje",
-      used: false,
-    },
-    {
-      id: 4,
-      type: "NisseGåden",
-      title: "Gåde 1",
-      text: "Hvad er det der er rødt og står i skoven?",
-      used: false,
-    },
-    {
-      id: 5,
-      type: "JuleKortet",
-      title: "Julekort 1",
-      text: "Skriv den mest kreative julehilsen.",
-      used: false,
-    },
+    { id: 3, type: "FiNisse", title: "FiNisse – Juletrøje", used: false },
+    { id: 4, type: "NisseGåden", title: "Gåde 1", text: "Hvad er det der er rødt og står i skoven?", used: false },
+    { id: 5, type: "JuleKortet", title: "Julekort 1", text: "Skriv den mest kreative julehilsen.", used: false },
   ];
 }
 
-// -----------------------------
 // localStorage
-// -----------------------------
 function saveStateToLocal() {
-  const localState = {
-    teams,
-    nextTeamId,
-    currentChallenge,
-    challengeDeck,
-  };
+  const localState = { teams, nextTeamId, currentChallenge, challengeDeck };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(localState));
 }
 
 function loadStateFromLocal() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
-
   try {
     const s = JSON.parse(raw);
     if (Array.isArray(s.teams)) teams = s.teams;
@@ -115,9 +80,7 @@ function loadStateFromLocal() {
   } catch {}
 }
 
-// -----------------------------
-// UI helpers
-// -----------------------------
+// helpers
 function updateCurrentChallengeTextOnly() {
   if (!currentChallenge) {
     currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
@@ -127,17 +90,12 @@ function updateCurrentChallengeTextOnly() {
   if (typeof currentChallenge === "string") {
     currentChallengeText.textContent = `Aktuel udfordring: ${currentChallenge}`;
   } else {
-    currentChallengeText.textContent =
-      `Aktuel udfordring: ${currentChallenge.type} (${currentChallenge.phase || "klar"})`;
+    const type = currentChallenge.type;
+    currentChallengeText.textContent = `Aktuel udfordring: ${type}`;
   }
 }
 
-// -----------------------------
-// Sync
-// -----------------------------
 function syncToServer() {
-  if (!socket || socket.disconnected) return;
-
   socket.emit("updateState", {
     teams,
     leaderboard: [],
@@ -146,9 +104,7 @@ function syncToServer() {
   });
 }
 
-// -----------------------------
 // Render leaderboard
-// -----------------------------
 function renderTeams() {
   const sorted = [...teams].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
@@ -202,19 +158,14 @@ function renderTeams() {
   });
 }
 
-// -----------------------------
-// Render challenge deck
-// -----------------------------
+// Render deck
 function renderDeck() {
-  if (!challengeGridEl) return;
-
   challengeGridEl.innerHTML = "";
 
   challengeDeck.forEach((card) => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
     btn.dataset.id = card.id;
-
     btn.textContent = card.title || card.type;
 
     if (card.used) {
@@ -233,21 +184,15 @@ function renderDeck() {
   });
 }
 
-// -----------------------------
-// Team management
-// -----------------------------
+// Teams
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
 
-  teams.push({
-    id: nextTeamId++,
-    name: trimmed,
-    points: 0,
-  });
-
+  teams.push({ id: nextTeamId++, name: trimmed, points: 0 });
   selectedTeamId = null;
   teamNameInput.value = "";
+
   saveStateToLocal();
   renderTeams();
   syncToServer();
@@ -256,6 +201,7 @@ function addTeam(name) {
 
 function changePoints(teamId, delta) {
   if (isPointsCooldown) return;
+
   const team = teams.find((t) => t.id === teamId);
   if (!team) return;
 
@@ -269,34 +215,29 @@ function changePoints(teamId, delta) {
   setTimeout(() => (isPointsCooldown = false), 500);
 }
 
-// -----------------------------
-// Decision buttons
-// -----------------------------
-function handleYes() {
-  if (!currentChallenge) {
-    alert("Vælg en udfordring først.");
-    return;
-  }
+function markLocalDeckUsed(id) {
+  const item = challengeDeck.find(c => c.id === id);
+  if (item) item.used = true;
+  saveStateToLocal();
+  renderDeck();
+  syncToServer();
+}
 
-  // Grandprix YES
+// Decision buttons
+function handleYes() {
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
+
   if (
     typeof currentChallenge === "object" &&
-    currentChallenge.type === "Nisse Grandprix" &&
-    currentChallenge.phase === "locked" &&
-    currentChallenge.firstBuzz
+    currentChallenge.type === "Nisse Grandprix"
   ) {
     socket.emit("grandprixYes");
     return;
   }
 
-  if (!selectedTeamId) {
-    alert("Vælg vinder i leaderboard først.");
-    return;
-  }
-
+  if (!selectedTeamId) return alert("Vælg vinder i leaderboard først.");
   changePoints(selectedTeamId, 1);
 
-  // mark used for normal challenges
   if (typeof currentChallenge === "object" && currentChallenge.id) {
     markLocalDeckUsed(currentChallenge.id);
   }
@@ -305,10 +246,9 @@ function handleYes() {
 function handleNo() {
   if (
     typeof currentChallenge === "object" &&
-    currentChallenge.type === "Nisse Grandprix" &&
-    currentChallenge.phase === "locked"
+    currentChallenge.type === "Nisse Grandprix"
   ) {
-    socket.emit("grandprixNo", {});
+    socket.emit("grandprixNo");
     return;
   }
 
@@ -326,24 +266,12 @@ function handleIncomplete() {
     return;
   }
 
-  // normal challenges -> mark used, no points
   if (typeof currentChallenge === "object" && currentChallenge.id) {
     markLocalDeckUsed(currentChallenge.id);
   }
 }
 
-// Local helper (UI only, server will also mark used)
-function markLocalDeckUsed(id) {
-  const item = challengeDeck.find(c => c.id === id);
-  if (item) item.used = true;
-  saveStateToLocal();
-  renderDeck();
-  syncToServer();
-}
-
-// -----------------------------
-// Reset / Start / End game
-// -----------------------------
+// Reset / Start / End
 function handleReset() {
   if (!confirm("Nulstil alle hold + point?")) return;
 
@@ -352,7 +280,6 @@ function handleReset() {
   selectedTeamId = null;
   currentChallenge = null;
   endGameResultEl.textContent = "";
-
   challengeDeck = challengeDeck.map(c => ({ ...c, used: false }));
 
   localStorage.removeItem(STORAGE_KEY);
@@ -383,9 +310,108 @@ function handleEndGame() {
   }
 }
 
-// -----------------------------
-// Event listeners
-// -----------------------------
+// Countdown on admin
+let gpAdminTimer = null;
+function startAdminCountdown(startAtMs, seconds) {
+  if (!gpCountdownEl) return;
+  if (gpAdminTimer) clearInterval(gpAdminTimer);
+
+  function tick() {
+    const now = Date.now();
+    const elapsed = Math.floor((now - startAtMs) / 1000);
+    const left = Math.max(0, seconds - elapsed);
+    gpCountdownEl.textContent = left;
+    if (left <= 0) clearInterval(gpAdminTimer);
+  }
+  tick();
+  gpAdminTimer = setInterval(tick, 100);
+}
+
+// WebRTC (admin hears mic)
+let gpAdminPC = null;
+let gpBuzzingTeamId = null;
+
+socket.on("gp-webrtc-offer", async ({ fromTeamId, offer }) => {
+  gpBuzzingTeamId = fromTeamId;
+
+  if (gpAdminPC) gpAdminPC.close();
+  gpAdminPC = new RTCPeerConnection();
+
+  gpAdminPC.ontrack = (ev) => {
+    if (gpRemoteAudio) gpRemoteAudio.srcObject = ev.streams[0];
+  };
+
+  gpAdminPC.onicecandidate = (ev) => {
+    if (ev.candidate && gpBuzzingTeamId) {
+      socket.emit("gp-webrtc-ice", {
+        toTeamId: gpBuzzingTeamId,
+        candidate: ev.candidate
+      });
+    }
+  };
+
+  await gpAdminPC.setRemoteDescription(offer);
+  const answer = await gpAdminPC.createAnswer();
+  await gpAdminPC.setLocalDescription(answer);
+
+  socket.emit("gp-webrtc-answer", {
+    toTeamId: gpBuzzingTeamId,
+    answer
+  });
+});
+
+socket.on("gp-webrtc-ice", async ({ candidate }) => {
+  try {
+    if (gpAdminPC && candidate) {
+      await gpAdminPC.addIceCandidate(candidate);
+    }
+  } catch {}
+});
+
+// Buzzed feedback
+socket.on("buzzed", (teamName) => {
+  currentChallengeText.textContent = `⛔ ${teamName} buzzed først!`;
+});
+
+// Receive state
+socket.on("state", (s) => {
+  if (!s) return;
+
+  if (s.gameCode && gameCodeValueEl) {
+    gameCodeValueEl.textContent = s.gameCode;
+  }
+
+  teams = Array.isArray(s.teams) ? s.teams : [];
+  currentChallenge = s.currentChallenge ?? null;
+
+  if (Array.isArray(s.challengeDeck)) {
+    challengeDeck = s.challengeDeck;
+  }
+
+  const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
+  nextTeamId = maxId + 1;
+
+  // Admin countdown display
+  const ch = s.currentChallenge;
+  if (
+    ch &&
+    typeof ch === "object" &&
+    ch.type === "Nisse Grandprix" &&
+    ch.phase === "locked" &&
+    ch.countdownStartAt
+  ) {
+    startAdminCountdown(ch.countdownStartAt, ch.countdownSeconds || 5);
+  } else if (gpCountdownEl) {
+    gpCountdownEl.textContent = "";
+  }
+
+  saveStateToLocal();
+  renderTeams();
+  renderDeck();
+  updateCurrentChallengeTextOnly();
+});
+
+// Listeners
 addTeamBtn.onclick = () => addTeam(teamNameInput.value);
 teamNameInput.onkeydown = (e) => {
   if (e.key === "Enter") addTeam(teamNameInput.value);
@@ -394,51 +420,13 @@ teamNameInput.onkeydown = (e) => {
 yesBtn.onclick = handleYes;
 noBtn.onclick = handleNo;
 incompleteBtn.onclick = handleIncomplete;
-
 endGameBtn.onclick = handleEndGame;
 resetBtn.onclick = handleReset;
 startGameBtn.onclick = handleStartGame;
 
-// -----------------------------
-// Receive state
-// -----------------------------
-socket.on("state", (serverState) => {
-  if (!serverState) return;
-
-  if (serverState.gameCode && gameCodeValueEl) {
-    gameCodeValueEl.textContent = serverState.gameCode;
-  }
-
-  teams = Array.isArray(serverState.teams) ? serverState.teams : [];
-  currentChallenge = serverState.currentChallenge ?? null;
-
-  if (Array.isArray(serverState.challengeDeck)) {
-    challengeDeck = serverState.challengeDeck;
-  }
-
-  // Show who buzzed first on admin
-socket.on("buzzed", (teamName) => {
-  // Simple visible feedback
-  currentChallengeText.textContent =
-    `⛔ ${teamName} buzzed først! Vent på svar…`;
-});
-
-
-  const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
-  nextTeamId = maxId + 1;
-
-  saveStateToLocal();
-  renderTeams();
-  renderDeck();
-  updateCurrentChallengeTextOnly();
-});
-
-// -----------------------------
-// Initial load
-// -----------------------------
+// Init
 loadStateFromLocal();
 
-// If no deck stored yet, make one and push to server once
 if (!challengeDeck.length) {
   challengeDeck = makeInitialDeck();
   saveStateToLocal();
@@ -449,5 +437,3 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-
-
