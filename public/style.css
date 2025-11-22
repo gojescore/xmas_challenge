@@ -210,6 +210,24 @@ body {
   flex-wrap: wrap;
 }
 
+/* Bigger main buttons */
+.challenge-controls button {
+  font-size: 1.3rem;
+  padding: 14px 22px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+
+/* Countdown badge */
+.gp-countdown {
+  min-width: 48px;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 900;
+  color: #111;
+}
+
+
 /* Bigger, clearer buttons */
 .challenge-controls button {
   font-size: 1.3rem;
@@ -338,3 +356,4 @@ body {
   }
 
 }
+
