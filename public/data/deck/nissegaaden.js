@@ -28,12 +28,5 @@ export const nisseGaaden = [
     title: "NisseGåden 4",
     text: "Jeg kan flyve uden vinger og græde uden øjne. Hvad er jeg?",
     used: false
-  },
-  {
-    id: "ng5",
-    type: "NisseGåden",
-    title: "NisseGåden 5",
-    text: "Hvad kan du fange, men aldrig kaste?",
-    used: false
   }
 ];
