@@ -1,478 +1,279 @@
-// public/main.js (v17 EVENT BULLETPROOF: deck can't disappear)
+// ===============================
+//  Xmas Challenge – MAIN ADMIN JS
+// ===============================
 
-const socket = (typeof io !== "undefined") ? io() : {
-  emit() {},
-  on() {},
-  disconnected: true
-};
+const socket = io();
 
-// ---------------- DOM ----------------
-const teamNameInput = document.getElementById("teamNameInput");
-const addTeamBtn = document.getElementById("addTeamBtn");
-const teamListEl = document.getElementById("teamList");
+// -------------------------------
+// Persistent admin-side state
+// -------------------------------
+let state = null;
 
-const challengeGridEl = document.querySelector(".challenge-grid");
-const currentChallengeText = document.getElementById("currentChallengeText");
-
-const yesBtn = document.getElementById("yesBtn");
-const noBtn = document.getElementById("noBtn");
-const incompleteBtn = document.getElementById("incompleteBtn");
-
-const endGameBtn = document.getElementById("endGameBtn");
-const endGameResultEl = document.getElementById("endGameResult");
-
-const resetBtn = document.getElementById("resetBtn");
-const startGameBtn = document.getElementById("startGameBtn");
-const gameCodeValueEl = document.getElementById("gameCodeValue");
-
-console.log("✅ main.js booted v17");
-
-// ---------------- Main countdown element ----------------
-let mainCountdownEl = null;
-function ensureMainCountdownEl() {
-  if (mainCountdownEl) return mainCountdownEl;
-  mainCountdownEl = document.createElement("span");
-  mainCountdownEl.id = "mainCountdown";
-  mainCountdownEl.style.cssText = `
-    font-weight:900; font-size:1.6rem; margin-left:10px;
-    padding:6px 10px; border-radius:8px; background:#111; color:#fff;
-    display:none; min-width:40px; text-align:center;
-  `;
-  incompleteBtn?.insertAdjacentElement("afterend", mainCountdownEl);
-  return mainCountdownEl;
-}
-
-// ---------------- STATE ----------------
-let teams = [];
-let selectedTeamId = null;
-let currentChallenge = null;
+// Local deck (full list of all challenges)
 let deck = [];
-let gameCode = null;
 
-let isPointsCooldown = false;
-const STORAGE_KEY = "xmasChallengeState_eventsafe_v2";
-
-// ---------------- Fallback deck (never empty) ----------------
+// -------------------------------
+// FALLBACK deck
+// -------------------------------
 const FALLBACK_DECK = [
   {
-    id: "gp_fallback_1",
+    id: "gp1",
     type: "Nisse Grandprix",
-    title: "Grandprix (fallback)",
-    audioUrl: "", // you can paste a URL later
+    title: "Grandprix 1",
+    audioUrl: "",
     used: false
   },
   {
-    id: "ng_fallback_1",
+    id: "ng1",
     type: "NisseGåden",
-    title: "NisseGåden (fallback)",
-    text: "Fallback gåde – udskift mig.",
+    title: "NisseGåden 1",
+    text: "Fallback gåde...",
     used: false
   }
 ];
 
-// ---------------- Safe deck loader ----------------
+// -------------------------------
+// DOM GETTER
+// -------------------------------
+function el(id) {
+  const node = document.getElementById(id);
+  if (!node) console.warn(`Missing #${id}`);
+  return node;
+}
+
+// -------------------------------
+// DOM references
+// -------------------------------
+const startBtn = el("startGameBtn");
+const resetBtn = el("resetBtn");
+const gameCodeValueEl = el("gameCodeValue");
+
+const teamNameInput = el("teamNameInput");
+const addTeamBtn = el("addTeamBtn");
+
+const teamListEl = el("teamList");
+const currentChallengeText = el("currentChallengeText");
+
+const yesBtn = el("yesBtn");
+const noBtn = el("noBtn");
+const incompleteBtn = el("incompleteBtn");
+const endGameBtn = el("endGameBtn");
+const endGameResult = el("endGameResult");
+
+const challengeGrid = document.querySelector(".challenge-grid");
+
+// -------------------------------
+// Save & sync
+// -------------------------------
+function saveLocal() {
+  localStorage.setItem("adminState", JSON.stringify({ deck }));
+}
+
+function syncToServer() {
+  socket.emit("updateState", {
+    ...state,
+    deck
+  });
+}
+
+// -------------------------------
+// LOAD DECK FROM FILES
+// -------------------------------
 async function loadDeckSafely() {
   let grandprixDeck = [];
   let nisseGaaden = [];
 
   try {
-    const gp = await import("./data/deck/grandprix.js");
-    // accept multiple export names
+    const gp = await import("./data/deck/grandprix.js?v=" + Date.now());
     grandprixDeck =
-      gp.grandprixDeck ||
-      gp.grandPrixDeck ||
-      gp.deck ||
-      gp.default ||
-      [];
-  } catch (e) {
-    console.warn("⚠️ Could not load grandprix deck:", e);
+      gp.grandprixDeck || gp.deck || gp.default || [];
+  } catch (err) {
+    console.warn("⚠️ Could not load grandprix deck:", err);
   }
 
   try {
-    const ng = await import("./data/deck/nissegaaden.js");
-    // accept multiple export names
+    const ng = await import("./data/deck/nissegaaden.js?v=" + Date.now());
     nisseGaaden =
-      ng.nisseGaaden ||
-      ng.nissegaaden ||
-      ng.nisseGaadenDeck ||
-      ng.deck ||
-      ng.default ||
-      [];
-  } catch (e) {
-    console.warn("⚠️ Could not load nissegaaden deck:", e);
+      ng.nisseGaaden || ng.deck || ng.default || [];
+  } catch (err) {
+    console.warn("⚠️ Could not load nissegaaden deck:", err);
   }
 
   deck = [...grandprixDeck, ...nisseGaaden]
     .filter(Boolean)
     .map(c => ({ ...c, used: !!c.used }));
 
-  // If still empty, fall back
   if (deck.length === 0) {
-    console.error("❌ Deck empty -> using FALLBACK_DECK");
+    console.error("❌ Deck empty -> using fallback");
     deck = FALLBACK_DECK.map(c => ({ ...c }));
   }
 
   renderDeck();
+
+  // IMPORTANT: push to server so it is never empty again
+  saveLocal();
+  syncToServer();
 }
 
-// ---------------- Persistence ----------------
-function saveLocal() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      teams, deck, currentChallenge, gameCode
-    }));
-  } catch {}
-}
-
-function loadLocal() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (Array.isArray(s.teams)) teams = s.teams;
-    if (Array.isArray(s.deck)) deck = s.deck;
-    if (s.currentChallenge) currentChallenge = s.currentChallenge;
-    if (s.gameCode) gameCode = s.gameCode;
-  } catch {}
-}
-
-// ---------------- Server sync ----------------
-function syncToServer() {
-  if (!socket || socket.disconnected) return;
-  socket.emit("updateState", { gameCode, teams, deck, currentChallenge });
-}
-
-// ---------------- Rendering ----------------
-function renderTeams() {
-  const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
-    return (a.name || "").localeCompare(b.name || "");
-  });
-
-  teamListEl.innerHTML = "";
-  sorted.forEach(team => {
-    const li = document.createElement("li");
-    li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
-
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "team-name";
-    nameSpan.textContent = team.name;
-
-    const pointsDiv = document.createElement("div");
-    pointsDiv.className = "team-points";
-
-    const pointsValue = document.createElement("span");
-    pointsValue.textContent = team.points ?? 0;
-
-    const plusBtn = document.createElement("button");
-    plusBtn.textContent = "+";
-    plusBtn.onclick = (e) => { e.stopPropagation(); changePoints(team.id, 1); };
-
-    const minusBtn = document.createElement("button");
-    minusBtn.textContent = "−";
-    minusBtn.onclick = (e) => { e.stopPropagation(); changePoints(team.id, -1); };
-
-    pointsDiv.append(minusBtn, pointsValue, plusBtn);
-    li.append(nameSpan, pointsDiv);
-
-    li.onclick = () => { selectedTeamId = team.id; renderTeams(); };
-    teamListEl.appendChild(li);
-  });
-}
-
+// -------------------------------
+// RENDER DECK INTO CHALLENGE GRID
+// -------------------------------
 function renderDeck() {
-  if (!challengeGridEl) return;
-  challengeGridEl.innerHTML = "";
+  if (!challengeGrid) return;
 
-  if (!deck.length) {
-    const warn = document.createElement("div");
-    warn.textContent = "⚠️ Ingen udfordringer fundet (deck tom).";
-    warn.style.cssText = "padding:12px; font-weight:900; color:crimson;";
-    challengeGridEl.appendChild(warn);
+  challengeGrid.innerHTML = "";
+
+  if (!deck || deck.length === 0) {
+    const w = document.createElement("p");
+    w.style.color = "red";
+    w.style.fontWeight = "bold";
+    w.textContent = "⚠️ Ingen udfordringer fundet (deck tom)";
+    challengeGrid.appendChild(w);
     return;
   }
 
-  deck.forEach(card => {
+  deck.forEach(ch => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
-    btn.textContent = card.title || card.type;
 
-    if (card.used) {
-      btn.style.opacity = "0.45";
-      btn.style.textDecoration = "line-through";
-    }
+    if (ch.used) btn.classList.add("used");
 
-    btn.onclick = () => {
-      if (card.used) return alert("Denne udfordring er allerede brugt.");
-      setCurrentChallenge(card);
-    };
+    btn.textContent = ch.title || ch.type;
 
-    challengeGridEl.appendChild(btn);
+    btn.addEventListener("click", () => {
+      ch.used = true;
+      startChallenge(ch);
+      saveLocal();
+      syncToServer();
+      renderDeck();
+    });
+
+    challengeGrid.appendChild(btn);
   });
 }
 
-// ---------------- Countdown ----------------
-let mainCountdownTimer = null;
-
-function renderCurrentChallenge() {
-  if (!currentChallenge) {
-    currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
-    hideMainCountdown();
-    return;
-  }
-
-  currentChallengeText.textContent =
-    `Aktuel udfordring: ${currentChallenge.title || currentChallenge.type}`;
-
-  if (
-    currentChallenge.type === "Nisse Grandprix" &&
-    currentChallenge.phase === "locked" &&
-    currentChallenge.countdownStartAt
-  ) {
-    showMainCountdown(currentChallenge.countdownStartAt, currentChallenge.countdownSeconds || 5);
-  } else hideMainCountdown();
-}
-
-function showMainCountdown(startAtMs, seconds) {
-  ensureMainCountdownEl();
-  mainCountdownEl.style.display = "inline-block";
-  if (mainCountdownTimer) clearInterval(mainCountdownTimer);
-
-  const tick = () => {
-    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
-    const left = Math.max(0, seconds - elapsed);
-    mainCountdownEl.textContent = left;
-
-    if (left <= 0) {
-      clearInterval(mainCountdownTimer);
-      mainCountdownTimer = null;
-      setTimeout(hideMainCountdown, 400);
-    }
+// -------------------------------
+// START A CHALLENGE
+// -------------------------------
+function startChallenge(challenge) {
+  state.currentChallenge = {
+    ...challenge,
+    phase: "listening",
+    startAt: Date.now()
   };
 
-  tick();
-  mainCountdownTimer = setInterval(tick, 100);
+  socket.emit("updateState", state);
 }
 
-function hideMainCountdown() {
-  if (mainCountdownTimer) clearInterval(mainCountdownTimer);
-  mainCountdownTimer = null;
-  if (mainCountdownEl) mainCountdownEl.style.display = "none";
-}
+// -------------------------------
+// TEAM MANAGEMENT
+// -------------------------------
+addTeamBtn.addEventListener("click", () => {
+  const name = teamNameInput.value.trim();
+  if (!name) return;
 
-// ---------------- Teams ----------------
-function addTeam(name) {
-  const trimmed = name.trim();
-  if (!trimmed) return;
-
-  if (teams.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
-    return alert("Holdnavnet findes allerede.");
-  }
-
-  teams.push({
-    id: "t" + (crypto?.randomUUID?.() || Date.now()),
-    name: trimmed,
-    points: 0,
-  });
-
-  selectedTeamId = null;
+  state.teams.push({ name, points: 0 });
   teamNameInput.value = "";
-  saveLocal();
-  renderTeams();
+
   syncToServer();
-}
-
-function changePoints(teamId, delta) {
-  if (isPointsCooldown) return;
-  const team = teams.find(t => t.id === teamId);
-  if (!team) return;
-
-  team.points = (team.points ?? 0) + delta;
-
-  saveLocal();
-  renderTeams();
-  syncToServer();
-
-  isPointsCooldown = true;
-  setTimeout(() => isPointsCooldown = false, 400);
-}
-
-// ---------------- Challenge selection ----------------
-function setCurrentChallenge(card) {
-  if (card.type === "Nisse Grandprix") {
-    const startDelayMs = 3000;
-    currentChallenge = {
-      ...card,
-      phase: "listening",
-      startAt: Date.now() + startDelayMs,
-      firstBuzz: null,
-      countdownSeconds: 5
-    };
-  } else {
-    currentChallenge = { ...card };
-  }
-
-  renderCurrentChallenge();
-  saveLocal();
-  syncToServer();
-}
-
-function markCurrentUsed() {
-  if (!currentChallenge) return;
-  const idx = deck.findIndex(c => c.id === currentChallenge.id);
-  if (idx >= 0) deck[idx].used = true;
-}
-
-function endCurrentChallenge() {
-  if (!currentChallenge) return;
-  if (currentChallenge.type === "Nisse Grandprix") {
-    currentChallenge = { ...currentChallenge, phase: "ended" };
-  } else {
-    currentChallenge = null;
-  }
-}
-
-// decisions: end GP first, then sync once
-function handleYes() {
-  if (!currentChallenge) return alert("Vælg en udfordring først.");
-  if (!selectedTeamId) return alert("Vælg vinderholdet.");
-
-  endCurrentChallenge();
-
-  const team = teams.find(t => t.id === selectedTeamId);
-  if (team) team.points = (team.points ?? 0) + 1;
-
-  markCurrentUsed();
-
-  renderTeams();
-  renderDeck();
-  renderCurrentChallenge();
-  saveLocal();
-  syncToServer();
-}
-
-function handleNo() {
-  if (!currentChallenge) return alert("Vælg en udfordring først.");
-  endCurrentChallenge();
-  markCurrentUsed();
-  renderDeck(); renderCurrentChallenge(); saveLocal(); syncToServer();
-}
-
-function handleIncomplete() {
-  if (!currentChallenge) return alert("Vælg en udfordring først.");
-  endCurrentChallenge();
-  markCurrentUsed();
-  renderDeck(); renderCurrentChallenge(); saveLocal(); syncToServer();
-}
-
-// reset
-function handleReset() {
-  const sure = confirm("Nulstil hele spillet?");
-  if (!sure) return;
-
-  if (currentChallenge?.type === "Nisse Grandprix") {
-    currentChallenge = { ...currentChallenge, phase: "ended" };
-  }
-
-  teams = [];
-  selectedTeamId = null;
-  currentChallenge = null;
-  deck = [];
-  gameCode = null;
-  endGameResultEl.textContent = "";
-
-  localStorage.removeItem(STORAGE_KEY);
-
-  loadDeckSafely();
-  renderTeams();
-  renderCurrentChallenge();
-  syncToServer();
-}
-
-// end game
-function handleEndGame() {
-  if (!teams.length) return alert("Ingen hold endnu.");
-
-  const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
-  const topScore = sorted[0].points ?? 0;
-  const winners = sorted.filter(t => (t.points ?? 0) === topScore);
-
-  endGameResultEl.textContent =
-    winners.length === 1
-      ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
-      : `Uafgjort mellem: ${winners.map(t => t.name).join(", ")} (${topScore} point)`;
-
-  if (currentChallenge?.type === "Nisse Grandprix") {
-    currentChallenge = { ...currentChallenge, phase: "ended" };
-    syncToServer();
-  }
-}
-
-// start game
-function handleStartGame() {
-  startGameBtn.disabled = true;
-
-  socket.emit("startGame", (res) => {
-    if (!res?.ok) {
-      alert(res?.message || "Kunne ikke starte spillet.");
-      startGameBtn.disabled = false;
-      return;
-    }
-
-    gameCode = res.gameCode;
-    if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
-
-    currentChallenge = null;
-
-    renderTeams();
-    renderDeck();
-    renderCurrentChallenge();
-    saveLocal();
-    syncToServer();
-  });
-}
-
-// listeners
-addTeamBtn?.addEventListener("click", () => addTeam(teamNameInput.value));
-teamNameInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") addTeam(teamNameInput.value);
 });
 
-yesBtn?.addEventListener("click", handleYes);
-noBtn?.addEventListener("click", handleNo);
-incompleteBtn?.addEventListener("click", handleIncomplete);
+// -------------------------------
+// DECISION BUTTONS
+// -------------------------------
+function endGrandprixEarly() {
+  socket.emit("gp-stop-audio-now");
+}
 
-resetBtn?.addEventListener("click", handleReset);
-endGameBtn?.addEventListener("click", handleEndGame);
-startGameBtn?.addEventListener("click", handleStartGame);
+yesBtn.addEventListener("click", () => {
+  endGrandprixEarly();
+  state.currentChallenge = null;
+  syncToServer();
+});
 
-// socket state
+noBtn.addEventListener("click", () => {
+  endGrandprixEarly();
+  state.currentChallenge = null;
+  syncToServer();
+});
+
+incompleteBtn.addEventListener("click", () => {
+  endGrandprixEarly();
+  state.currentChallenge = null;
+  syncToServer();
+});
+
+// -------------------------------
+// RESET GAME
+// -------------------------------
+resetBtn.addEventListener("click", () => {
+  state.currentChallenge = null;
+  state.teams = [];
+  deck.forEach(c => (c.used = false));
+
+  syncToServer();
+  renderDeck();
+});
+
+// -------------------------------
+// END GAME
+// -------------------------------
+endGameBtn.addEventListener("click", () => {
+  if (!state || !state.teams.length) return;
+
+  const sorted = [...state.teams].sort((a, b) => b.points - a.points);
+  const winner = sorted[0];
+
+  endGameResult.textContent = `Vinderen er: ${winner.name}! 🎉`;
+
+  endGrandprixEarly();
+  state.currentChallenge = null;
+  syncToServer();
+});
+
+// -------------------------------
+// START GAME (generate code)
+// -------------------------------
+startBtn.addEventListener("click", () => {
+  const code = Math.floor(1000 + Math.random() * 9000).toString();
+  state.gameCode = code;
+  gameCodeValueEl.textContent = code;
+
+  syncToServer();
+});
+
+// -------------------------------
+// RECEIVE STATE FROM SERVER
+// -------------------------------
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode && gameCodeValueEl) {
-    gameCode = s.gameCode;
-    gameCodeValueEl.textContent = gameCode;
+  state = s;
+
+  if (state.gameCode) {
+    gameCodeValueEl.textContent = state.gameCode;
   }
 
-  if (Array.isArray(s.teams)) teams = s.teams;
-  if (Array.isArray(s.deck)) deck = s.deck;
-  currentChallenge = s.currentChallenge || null;
+  // IMPORTANT: don't let server overwrite with empty deck
+  if (Array.isArray(s.deck)) {
+    if (s.deck.length === 0 && deck.length > 0) {
+      console.warn("Ignored empty deck from server");
+    } else {
+      deck = s.deck;
+    }
+  }
 
-  saveLocal();
-  renderTeams();
   renderDeck();
-  renderCurrentChallenge();
 });
 
-socket.on("buzzed", (teamName) => {
-  const t = teams.find(x => x.name === teamName);
-  if (t) { selectedTeamId = t.id; renderTeams(); }
-});
+// -------------------------------
+// INIT
+// -------------------------------
+state = {
+  teams: [],
+  currentChallenge: null,
+  gameCode: null,
+  deck: []
+};
 
-// init
-loadLocal();
-renderTeams();
-renderCurrentChallenge();
 loadDeckSafely();
-if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
