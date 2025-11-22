@@ -1,5 +1,5 @@
 // public/team.js
-import { renderGrandprix } from "./minigames/grandprix.js";
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 
 const socket = io();
 
@@ -125,7 +125,6 @@ function tryJoinTeam() {
 
     if (joinSection) joinSection.style.display = "none";
 
-    // mini-games decide buzz
     api.clearMiniGame();
   });
 }
@@ -137,7 +136,6 @@ if (buzzBtn) {
   buzzBtn.addEventListener("click", () => {
     if (!joined) return;
 
-    // send current audio time if Grandprix is running
     let audioPosition = null;
     if (window.__grandprixAudio) {
       audioPosition = window.__grandprixAudio.currentTime;
@@ -149,6 +147,12 @@ if (buzzBtn) {
 
 socket.on("buzzed", (teamName) => {
   if (statusEl) statusEl.textContent = `${teamName} buzzede først!`;
+});
+
+// ✅ Admin pressed decision/reset/end -> stop GP audio instantly
+socket.on("gp-stop-audio-now", () => {
+  stopGrandprix();
+  api.clearMiniGame();
 });
 
 // --------------------------
@@ -184,6 +188,7 @@ function renderChallenge(challenge) {
   if (buzzBtn) buzzBtn.disabled = true;
 
   if (!challenge) {
+    stopGrandprix();
     if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
     if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
@@ -198,6 +203,7 @@ function renderChallenge(challenge) {
     return;
   }
 
+  stopGrandprix();
   api.clearMiniGame();
 }
 
@@ -253,7 +259,7 @@ async function startMicToAdmin() {
     await gpTeamPC.setLocalDescription(offer);
 
     socket.emit("gp-webrtc-offer", { offer });
-  } catch (err) {
+  } catch {
     api.showStatus("⚠️ Mikrofon kræver tilladelse.");
   }
 }
@@ -317,7 +323,6 @@ socket.on("state", (serverState) => {
     ch.phase === "locked";
 
   if (!isLockedGrandprix) {
-    // if round moved on, stop mic + hide popup
     stopMicNow();
     if (gpPopup) gpPopup.style.display = "none";
   }
