@@ -2,257 +2,94 @@
 <html lang="da">
 <head>
   <meta charset="UTF-8" />
-  <title>Xmas Challenge – Team</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Xmas Challenge – Team</title>
 
-  <style>
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #0e2238, #162f52);
-      min-height: 100vh;
-      color: #f7f7f7;
-      display: flex;
-      justify-content: center;
-      align-items: stretch;
-    }
-
-    .app {
-      width: 100%;
-      max-width: 1200px;
-      margin: 12px;
-      padding: 12px;
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 12px;
-    }
-
-    header {
-      grid-column: 1 / -1;
-      background: rgba(255,255,255,0.08);
-      border-radius: 14px;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    header h1 {
-      margin: 0;
-      font-size: 1.8rem;
-      color: #ffdf6b;
-      text-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    }
-
-    header .code-pill {
-      font-weight: 800;
-      font-size: 1.2rem;
-      background: rgba(0,0,0,0.35);
-      padding: 6px 10px;
-      border-radius: 999px;
-      letter-spacing: 1px;
-    }
-
-    .panel {
-      background: rgba(255,255,255,0.08);
-      border-radius: 14px;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .join-box {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      background: rgba(0,0,0,0.25);
-      padding: 12px;
-      border-radius: 12px;
-    }
-
-    .row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    input {
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: none;
-      width: 180px;
-      font-size: 1rem;
-    }
-
-    button {
-      border: none;
-      border-radius: 999px;
-      padding: 8px 14px;
-      font-weight: 700;
-      cursor: pointer;
-      font-size: 1rem;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    }
-
-    .primary {
-      background: linear-gradient(135deg, #22c55e, #15803d);
-      color: white;
-    }
-
-    .buzz {
-      background: linear-gradient(135deg, #ff3b30, #b71c1c);
-      color: white;
-      font-size: 1.4rem;
-      padding: 14px 20px;
-    }
-
-    .buzz:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    .muted {
-      font-size: 0.9rem;
-      opacity: 0.85;
-    }
-
-    #status {
-      min-height: 1.2em;
-      font-weight: 700;
-      color: #ffd54f;
-    }
-
-    #challengeTitle {
-      font-size: 1.8rem;
-      font-weight: 900;
-      text-align: center;
-      margin: 6px 0;
-      color: #ffdf6b;
-    }
-
-    #challengeText {
-      font-size: 1.1rem;
-      text-align: center;
-      padding: 8px;
-      background: rgba(0,0,0,0.25);
-      border-radius: 10px;
-      min-height: 70px;
-      display: grid;
-      place-items: center;
-    }
-
-    aside h2 {
-      margin: 0 0 6px;
-      font-size: 1.2rem;
-    }
-
-    ul.team-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    li.team-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.9);
-      color: #111;
-      font-weight: 700;
-    }
-
-    li.team-item .pts {
-      background: #111;
-      color: white;
-      padding: 2px 8px;
-      border-radius: 999px;
-      min-width: 34px;
-      text-align: center;
-    }
-
-    @media (max-width: 900px) {
-      .app {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <!-- Use your existing CSS if you have one -->
+  <link rel="stylesheet" href="style.css?v=1" />
 </head>
-
 <body>
   <div class="app">
-    <header>
-      <header>
-  <h1>
-    🎄 Xmas Challenge – Team
-    <span id="teamNameLabel" style="font-size:1.2rem; font-weight:600; margin-left:10px; color:#333;"></span>
-  </h1>
-<header style="text-align:center; margin-bottom:20px;">
-  <h1 style="margin:0;">🎄 Xmas Challenge – Team</h1>
-  <p id="teamNameLabel" style="
-      margin:4px 0 0;
-      font-size:1.4rem;
-      font-weight:600;
-      color:inherit;   /* same color as header text */
-  "></p>
-</header>
 
+    <!-- HEADER -->
+    <header style="text-align:center; margin-bottom:20px;">
+      <h1 style="margin:0;">🎄 Xmas Challenge – Team</h1>
+      <p id="teamNameLabel" style="
+          margin:4px 0 0;
+          font-size:1.4rem;
+          font-weight:600;
+          color:inherit;
+      "></p>
+    </header>
 
-    <!-- LEFT PANEL -->
-    <main class="panel">
-      <section class="join-box" id="joinSection">
-        <h2>Join spillet</h2>
+    <!-- JOIN SECTION -->
+    <section id="joinSection" style="max-width:420px; margin:0 auto 20px auto;">
+      <h2>Join spillet</h2>
 
-        <div class="row">
-          <input id="codeInput" type="text" placeholder="Game code" />
-          <button id="codeBtn" class="primary">Join med code</button>
+      <!-- Step 1: game code -->
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input id="codeInput" type="text" placeholder="Indtast game code" />
+        <button id="codeBtn">Join med kode</button>
+      </div>
+
+      <!-- Step 2: team name -->
+      <div id="nameRow" style="display:none; gap:8px; margin-bottom:8px;">
+        <input id="nameInput" type="text" placeholder="Skriv jeres teamnavn" />
+        <button id="nameBtn">Join som team</button>
+      </div>
+
+      <p id="joinMsg" style="font-weight:600;"></p>
+    </section>
+
+    <!-- TOP INFO BAR -->
+    <section style="text-align:center; margin-bottom:16px;">
+      Game code: <strong><span id="codeDisplay">----</span></strong>
+    </section>
+
+    <main class="layout" style="display:grid; grid-template-columns: 2fr 1fr; gap:16px;">
+
+      <!-- LEFT: CHALLENGE + BUZZ -->
+      <section class="main-panel" style="display:flex; flex-direction:column; gap:12px;">
+
+        <div class="current-challenge" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
+          <h2 id="challengeTitle">Ingen udfordring endnu</h2>
+          <p id="challengeText">Vent på læreren…</p>
         </div>
 
-        <div class="row" id="nameRow" style="display:none;">
-          <input id="nameInput" type="text" placeholder="Team navn" />
-          <button id="nameBtn" class="primary">Join som team</button>
+        <div style="text-align:center;">
+          <button id="buzzBtn" disabled style="
+            font-size:1.4rem;
+            font-weight:800;
+            background:crimson;
+            color:white;
+            border:none;
+            padding:14px 22px;
+            border-radius:12px;
+            cursor:pointer;
+          ">
+            🛑 STOP / BUZZ
+          </button>
+
+          <p id="status" style="margin-top:10px; font-size:1.1rem; font-weight:700;"></p>
         </div>
 
-        <p id="joinMsg" class="muted"></p>
       </section>
 
-      <section class="panel" style="background: transparent; padding:0;">
-        <div id="challengeTitle">Ingen udfordring endnu</div>
-        <div id="challengeText">Vent på læreren…</div>
-      </section>
+      <!-- RIGHT: LEADERBOARD -->
+      <aside class="sidebar" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
+        <h2>Leaderboard</h2>
+        <ul id="teamList" class="team-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;">
+          <!-- JS fills -->
+        </ul>
+      </aside>
 
-      <section class="panel" style="background: transparent; padding:0;">
-        <button id="buzzBtn" class="buzz" disabled>🔔 STOP / BUZZ!</button>
-        <div id="status"></div>
-      </section>
     </main>
-
-    <!-- RIGHT PANEL -->
-    <aside class="panel">
-      <h2>Leaderboard</h2>
-      <ul id="teamList" class="team-list"></ul>
-    </aside>
   </div>
 
-  <!-- socket.io client from your server -->
+  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="team.js?v=4"></script>
 
-
+  <!-- Team script (cache-busted) -->
+  <script type="module" src="team.js?v=5"></script>
 </body>
 </html>
-
-
-
-
-
-
-
