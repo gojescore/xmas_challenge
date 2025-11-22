@@ -37,8 +37,9 @@ const statusEl = el("status");
 const teamNameLabel = el("teamNameLabel");
 
 // ---- AUDIO UNLOCK BANNER ----
-const audioBanner = document.getElementById("audioUnlockBanner");
-const audioUnlockBtn = document.getElementById("audioUnlockBtn");
+const audioBanner = el("audioUnlockBanner");
+const audioUnlockBtn = el("audioUnlockBtn");
+
 
 function hideAudioBanner() {
   if (audioBanner) audioBanner.style.display = "none";
@@ -365,4 +366,5 @@ socket.on("state", (serverState) => {
     startMicToAdmin();
   }
 });
+
 
