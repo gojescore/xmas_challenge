@@ -4,7 +4,6 @@ const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 const multer = require("multer");
 const fs = require("fs");
-const path = require("path");
 
 // -----------------------------
 // STATIC / UPLOADS
@@ -23,24 +22,11 @@ app.post("/upload", upload.single("file"), (req, res) => {
 });
 
 // -----------------------------
-// GAME STATE
+// HELPERS
 // -----------------------------
 function makeGameCode() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
-
-let state = {
-  gameCode: null,
-  teams: [],
-  leaderboard: [],
-  // NEW: deck of cards
-  challengeDeck: [],
-  // current challenge can be string or object
-  currentChallenge: null,
-  currentChallengeId: null, // NEW: tracks which deck card is active
-};
-
-let nextTeamId = 1;
 
 function emitState() {
   io.emit("state", state);
@@ -63,7 +49,6 @@ function markDeckUsed(id) {
   if (item) item.used = true;
 }
 
-// Helper: start Grandprix from a deck item
 function startGrandprixFromDeck(item) {
   const delay = 2000;
   const now = Date.now();
@@ -78,9 +63,29 @@ function startGrandprixFromDeck(item) {
     audioPosition: 0,
     firstBuzz: null,
     lockedOut: [],
+    countdownStartAt: null,
+    countdownSeconds: 5,
   };
+
   state.currentChallengeId = item.id;
 }
+
+// -----------------------------
+// GAME STATE
+// -----------------------------
+let state = {
+  gameCode: null,
+  teams: [],
+  leaderboard: [],
+  challengeDeck: [],
+  currentChallenge: null,
+  currentChallengeId: null,
+};
+
+let nextTeamId = 1;
+
+// Track admin sockets for WebRTC signaling
+const adminSockets = new Set();
 
 // -----------------------------
 // SOCKET.IO
@@ -89,7 +94,13 @@ io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
   socket.emit("state", state);
 
-  // ADMIN: start new game -> create code, reset teams + deck used flags
+  // Admin registers
+  socket.on("registerAdmin", () => {
+    adminSockets.add(socket.id);
+    socket.role = "admin";
+  });
+
+  // ADMIN: start new game
   socket.on("startGame", () => {
     state.gameCode = makeGameCode();
     state.teams = [];
@@ -97,14 +108,14 @@ io.on("connection", (socket) => {
     state.currentChallenge = null;
     state.currentChallengeId = null;
 
-    // reset deck used flags
+    // reset used flags
     state.challengeDeck = state.challengeDeck.map(c => ({ ...c, used: false }));
 
     console.log("Game started. Code:", state.gameCode);
     emitState();
   });
 
-  // TEAM: join by code + unique name
+  // TEAM: join game
   socket.on("joinGame", ({ code, teamName }, ack) => {
     try {
       const cleanCode = (code || "").trim();
@@ -130,7 +141,6 @@ io.on("connection", (socket) => {
       };
 
       state.teams.push(newTeam);
-
       socket.teamId = newTeam.id;
       socket.teamName = newTeam.name;
 
@@ -144,14 +154,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ADMIN: send whole deck to server (initial or updates)
+  // ADMIN: set full deck
   socket.on("setDeck", (deck) => {
     if (!Array.isArray(deck)) return;
     state.challengeDeck = deck;
     emitState();
   });
 
-  // ADMIN: start a deck challenge by id
+  // ADMIN: start a deck challenge
   socket.on("startChallenge", (challengeId) => {
     const id = Number(challengeId);
     const item = findDeckItemById(id);
@@ -164,7 +174,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Normal challenges: just broadcast the item as current challenge
     state.currentChallenge = {
       id: item.id,
       type: item.type,
@@ -177,8 +186,8 @@ io.on("connection", (socket) => {
     emitState();
   });
 
-  // BASIC buzz for Grandprix
-  socket.on("buzz", () => {
+  // TEAM: buzz (only for Grandprix listening)
+  socket.on("buzz", ({ audioPosition } = {}) => {
     const teamId = socket.teamId;
     const teamName = socket.teamName;
     if (!teamId || !teamName) return;
@@ -188,37 +197,25 @@ io.on("connection", (socket) => {
     if (ch.type !== "Nisse Grandprix") return;
     if (ch.phase !== "listening") return;
 
-    if (Array.isArray(ch.lockedOut) && ch.lockedOut.includes(teamId)) {
-      socket.emit("buzzRejected", { reason: "lockedOut" });
-      return;
-    }
+    if (ch.lockedOut.includes(teamId)) return;
+    if (ch.firstBuzz) return;
 
-    if (ch.firstBuzz) {
-      socket.emit("buzzRejected", { reason: "tooLate" });
-      return;
+    if (typeof audioPosition === "number" && !Number.isNaN(audioPosition)) {
+      ch.audioPosition = audioPosition;
     }
 
     ch.firstBuzz = { teamId, teamName, at: Date.now() };
     ch.phase = "locked";
 
+    // ⭐ start global 5-second countdown
+    ch.countdownStartAt = Date.now() + 200;
+    ch.countdownSeconds = 5;
+
     io.emit("buzzed", teamName);
     emitState();
   });
 
-  // ADMIN: generic state update (kept for future)
-  socket.on("updateState", (newState) => {
-    const safeCode = state.gameCode;
-    const safeDeck = state.challengeDeck;
-
-    state = newState || state;
-
-    if (!state.gameCode) state.gameCode = safeCode;
-    if (!Array.isArray(state.challengeDeck)) state.challengeDeck = safeDeck;
-
-    emitState();
-  });
-
-  // GRANDPRIX YES -> award + end + mark deck used
+  // ADMIN: Grandprix YES
   socket.on("grandprixYes", () => {
     const ch = state.currentChallenge;
     if (!ch || typeof ch !== "object") return;
@@ -233,11 +230,12 @@ io.on("connection", (socket) => {
     if (state.currentChallengeId != null) {
       markDeckUsed(state.currentChallengeId);
     }
+
     emitState();
   });
 
-  // GRANDPRIX NO -> lock out buzzer team + resume
-  socket.on("grandprixNo", ({ audioPosition } = {}) => {
+  // ADMIN: Grandprix NO (resume, lock out buzzing team)
+  socket.on("grandprixNo", () => {
     const ch = state.currentChallenge;
     if (!ch || typeof ch !== "object") return;
     if (ch.type !== "Nisse Grandprix") return;
@@ -248,16 +246,12 @@ io.on("connection", (socket) => {
 
     ch.firstBuzz = null;
     ch.phase = "listening";
-
-    if (typeof audioPosition === "number") {
-      ch.audioPosition = audioPosition;
-    }
-
     ch.resumeAt = Date.now() + 1000;
+
     emitState();
   });
 
-  // GRANDPRIX INCOMPLETE -> end without points + mark used
+  // ADMIN: Grandprix INCOMPLETE
   socket.on("grandprixIncomplete", () => {
     const ch = state.currentChallenge;
     if (!ch || typeof ch !== "object") return;
@@ -267,15 +261,55 @@ io.on("connection", (socket) => {
     if (state.currentChallengeId != null) {
       markDeckUsed(state.currentChallengeId);
     }
+
     emitState();
   });
 
+  // ------- WebRTC signaling (mic team -> admin only) -------
+  socket.on("gp-webrtc-offer", (payload) => {
+    for (const id of adminSockets) {
+      io.to(id).emit("gp-webrtc-offer", {
+        fromTeamId: socket.teamId,
+        fromTeamName: socket.teamName,
+        offer: payload.offer,
+      });
+    }
+  });
+
+  socket.on("gp-webrtc-answer", ({ toTeamId, answer }) => {
+    for (const [id, s] of io.of("/").sockets) {
+      if (s.teamId === toTeamId) {
+        io.to(id).emit("gp-webrtc-answer", { answer });
+        break;
+      }
+    }
+  });
+
+  socket.on("gp-webrtc-ice", ({ toTeamId, candidate }) => {
+    if (socket.role === "admin") {
+      for (const [id, s] of io.of("/").sockets) {
+        if (s.teamId === toTeamId) {
+          io.to(id).emit("gp-webrtc-ice", { candidate });
+          break;
+        }
+      }
+    } else {
+      for (const id of adminSockets) {
+        io.to(id).emit("gp-webrtc-ice", {
+          fromTeamId: socket.teamId,
+          candidate
+        });
+      }
+    }
+  });
+
   socket.on("disconnect", () => {
+    adminSockets.delete(socket.id);
     console.log("Client disconnected:", socket.id);
   });
 });
 
-// Root route
+// Root
 app.get("/", (req, res) => {
   res.send("Xmas Challenge Server Running");
 });
