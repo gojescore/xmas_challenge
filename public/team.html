@@ -4,14 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Team</title>
+  <link rel="stylesheet" href="style.css?v=7" />
 
-  <!-- Use your existing CSS if you have one -->
-  <link rel="stylesheet" href="style.css?v=1" />
+  <!-- Minimal safety overrides (keep for functionality-first) -->
+  <style>
+    #joinSection { display:block !important; }
+    header h1::before, header h1::after { content:none !important; }
+  </style>
 </head>
 <body>
   <div class="app">
 
-    <!-- HEADER -->
     <header style="text-align:center; margin-bottom:20px;">
       <h1 style="margin:0;">🎄 Xmas Challenge – Team</h1>
       <p id="teamNameLabel" style="
@@ -26,13 +29,11 @@
     <section id="joinSection" style="max-width:420px; margin:0 auto 20px auto;">
       <h2>Join spillet</h2>
 
-      <!-- Step 1: game code -->
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <input id="codeInput" type="text" placeholder="Indtast game code" />
         <button id="codeBtn">Join med kode</button>
       </div>
 
-      <!-- Step 2: team name -->
       <div id="nameRow" style="display:none; gap:8px; margin-bottom:8px;">
         <input id="nameInput" type="text" placeholder="Skriv jeres teamnavn" />
         <button id="nameBtn">Join som team</button>
@@ -41,14 +42,12 @@
       <p id="joinMsg" style="font-weight:600;"></p>
     </section>
 
-    <!-- TOP INFO BAR -->
     <section style="text-align:center; margin-bottom:16px;">
       Game code: <strong><span id="codeDisplay">----</span></strong>
     </section>
 
     <main class="layout" style="display:grid; grid-template-columns: 2fr 1fr; gap:16px;">
 
-      <!-- LEFT: CHALLENGE + BUZZ -->
       <section class="main-panel" style="display:flex; flex-direction:column; gap:12px;">
 
         <div class="current-challenge" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
@@ -75,21 +74,27 @@
 
       </section>
 
-      <!-- RIGHT: LEADERBOARD -->
       <aside class="sidebar" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
         <h2>Leaderboard</h2>
-        <ul id="teamList" class="team-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;">
-          <!-- JS fills -->
-        </ul>
+        <ul id="teamList" class="team-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;"></ul>
       </aside>
 
     </main>
   </div>
 
-  <!-- Socket.IO client -->
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- GRANDPRIX fullscreen popup -->
+  <div id="grandprixPopup" style="
+    position:fixed; inset:0; background:rgba(0,0,0,0.85);
+    display:none; align-items:center; justify-content:center; z-index:9999;
+    color:white; text-align:center; flex-direction:column; gap:12px;
+  ">
+    <div style="font-size:2.2rem; font-weight:800;">
+      Svar inden tiden udløber
+    </div>
+    <div id="grandprixPopupCountdown" style="font-size:7rem; font-weight:900;"></div>
+  </div>
 
-  <!-- Team script (cache-busted) -->
-  <script type="module" src="team.js?v=5"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="team.js?v=7"></script>
 </body>
 </html>
