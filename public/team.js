@@ -1,29 +1,19 @@
-// Team page (ES module) — SAFE version with lazy mini-game loading
+// public/team.js
+// Connect to the same server that serves this page
+import { renderGrandprix } from "./minigames/grandprix.js";
 
-// --- Socket init (defensive) ---
-let socket = null;
+const socket = io();
 
-if (typeof io !== "undefined") {
-  socket = io();
-  console.log("Socket.IO connected (team page).");
-} else {
-  console.warn("Socket.IO not loaded yet. Using dummy socket.");
-  socket = {
-    emit: () => {},
-    on: () => {},
-    disconnected: true,
-  };
-}
-
-let joined = false;
-let joinedCode = null;
-let myTeamName = null;
-
+// --------------------------
+// DOM ELEMENTS
+// --------------------------
 const codeInput = document.getElementById("codeInput");
 const codeBtn = document.getElementById("codeBtn");
+
 const nameRow = document.getElementById("nameRow");
 const nameInput = document.getElementById("nameInput");
 const nameBtn = document.getElementById("nameBtn");
+
 const joinMsg = document.getElementById("joinMsg");
 
 const codeDisplay = document.getElementById("codeDisplay");
@@ -35,23 +25,36 @@ const challengeText = document.getElementById("challengeText");
 const buzzBtn = document.getElementById("buzzBtn");
 const statusEl = document.getElementById("status");
 
-// --- Mini-game API ---
+const teamNameLabel = document.getElementById("teamNameLabel");
+
+// --------------------------
+// STATE
+// --------------------------
+let joined = false;
+let joinedCode = null;
+let myTeamName = null;
+
+// --------------------------
+// API given to mini-games
+// --------------------------
 const api = {
   setBuzzEnabled(enabled) {
     buzzBtn.disabled = !enabled;
   },
+
   showStatus(text) {
     statusEl.textContent = text;
   },
+
   clearMiniGame() {
     statusEl.textContent = "";
     buzzBtn.disabled = true;
-  },
+  }
 };
 
-// ----------------------
-// JOIN FLOW
-// ----------------------
+// --------------------------
+// JOIN STEP 1: ENTER CODE
+// --------------------------
 codeBtn.addEventListener("click", tryCode);
 codeInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") tryCode();
@@ -60,18 +63,21 @@ codeInput.addEventListener("keydown", (e) => {
 function tryCode() {
   const code = codeInput.value.trim();
   if (!code) {
-    joinMsg.textContent = "Skriv en code først.";
+    joinMsg.textContent = "Skriv en kode først.";
     return;
   }
 
   joinedCode = code;
   codeDisplay.textContent = code;
-  joinMsg.textContent = "Code accepteret. Skriv jeres teamnavn.";
+  joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
 
   nameRow.style.display = "flex";
   nameInput.focus();
 }
 
+// --------------------------
+// JOIN STEP 2: ENTER TEAM NAME
+// --------------------------
 nameBtn.addEventListener("click", tryJoinTeam);
 nameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") tryJoinTeam();
@@ -79,7 +85,7 @@ nameInput.addEventListener("keydown", (e) => {
 
 function tryJoinTeam() {
   if (!joinedCode) {
-    joinMsg.textContent = "Indtast code først.";
+    joinMsg.textContent = "Indtast kode først.";
     return;
   }
 
@@ -99,20 +105,22 @@ function tryJoinTeam() {
     myTeamName = res.team.name;
 
     joinMsg.textContent = `✅ I er nu med som: ${myTeamName}`;
-    document.getElementById("teamNameLabel").textContent = myTeamName;
 
-    document.getElementById("teamNameLabel").textContent = `– ${myTeamName}`;
+    // ⭐ This is all you need to set the header name
+    if (teamNameLabel) {
+      teamNameLabel.textContent = myTeamName;
+    }
 
     document.getElementById("joinSection").style.display = "none";
 
-    // Mini-games decide buzz (not here)
+    // Mini-games will decide when buzzing starts
     api.clearMiniGame();
   });
 }
 
-// ----------------------
-// SOCKET EVENTS
-// ----------------------
+// --------------------------
+// RECEIVE GLOBAL STATE
+// --------------------------
 socket.on("state", (serverState) => {
   if (!serverState) return;
 
@@ -124,18 +132,21 @@ socket.on("state", (serverState) => {
   renderChallenge(serverState.currentChallenge);
 });
 
+// --------------------------
+// BUZZ HANDLING
+// --------------------------
 buzzBtn.addEventListener("click", () => {
   if (!joined) return;
   socket.emit("buzz");
 });
 
 socket.on("buzzed", (teamName) => {
-  statusEl.textContent = `${teamName} buzzed først!`;
+  statusEl.textContent = `${teamName} buzzede først!`;
 });
 
-// ----------------------
-// RENDERING
-// ----------------------
+// --------------------------
+// RENDERING HELPERS
+// --------------------------
 function renderLeaderboard(teams) {
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) {
@@ -159,71 +170,34 @@ function renderLeaderboard(teams) {
 
     li.appendChild(left);
     li.appendChild(right);
+
     teamListEl.appendChild(li);
   });
 }
 
-// --- Lazy mini-game loader ---
-// Map challenge type -> module path + export name
-const MINI_GAMES = {
-  "Nisse Grandprix": {
-    path: "./minigames/grandprix.js",
-    exportName: "renderGrandprix",
-  },
-
-  // Add later when files exist:
-  // "FiNisse": { path: "./minigames/finisse.js", exportName: "renderFiNisse" },
-  // "NisseGåden": { path: "./minigames/nissegaaden.js", exportName: "renderNisseGaaden" },
-  // "JuleKortet": { path: "./minigames/julekortet.js", exportName: "renderJuleKortet" },
-  // "Nisse-udfordringen": { path: "./minigames/nisse_udfordringen.js", exportName: "renderNisseUdfordringen" },
-};
-
-async function runMiniGame(type, challenge) {
-  const cfg = MINI_GAMES[type];
-  if (!cfg) {
-    api.clearMiniGame();
-    return;
-  }
-
-  try {
-    const mod = await import(cfg.path);
-    const fn = mod[cfg.exportName];
-    if (typeof fn === "function") {
-      fn(challenge, api);
-    } else {
-      console.warn(`Mini-game export not found: ${cfg.exportName}`);
-      api.clearMiniGame();
-    }
-  } catch (err) {
-    console.error("Mini-game failed to load:", cfg.path, err);
-    // Don’t kill the UI — just show default view
-    api.clearMiniGame();
-  }
-}
-
 function renderChallenge(challenge) {
-  api.clearMiniGame();
+  // Default: buzzing disabled
+  buzzBtn.disabled = true;
 
   if (!challenge) {
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
+    api.clearMiniGame();
     return;
   }
 
-  let type;
+  // Normal title fallback
+  challengeTitle.textContent = challenge.type || "Udfordring";
+  challengeText.textContent = challenge.text || "";
 
-  if (typeof challenge === "string") {
-    type = challenge;
-    challengeTitle.textContent = challenge;
-    challengeText.textContent = "Se instruktioner på skærmen.";
-  } else {
-    type = challenge.type || "Ny udfordring!";
-    challengeTitle.textContent = type;
-    challengeText.textContent =
-      challenge.text || "Se instruktioner på skærmen.";
+  // Decide which minigame to load
+  if (typeof challenge === "object") {
+    if (challenge.type === "Nisse Grandprix") {
+      renderGrandprix(challenge, api);
+      return;
+    }
   }
 
-  runMiniGame(type, challenge);
+  // If no specific minigame:
+  api.clearMiniGame();
 }
-
-
