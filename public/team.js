@@ -55,12 +55,10 @@ const api = {
 };
 
 // ---- Join step 1: code ----
-if (codeBtn && codeInput) {
-  codeBtn.addEventListener("click", tryCode);
-  codeInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") tryCode();
-  });
-}
+codeBtn?.addEventListener("click", tryCode);
+codeInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") tryCode();
+});
 
 function tryCode() {
   const code = (codeInput?.value || "").trim();
@@ -70,7 +68,6 @@ function tryCode() {
   }
 
   joinedCode = code;
-
   if (codeDisplay) codeDisplay.textContent = code;
   if (joinMsg) joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
 
@@ -79,12 +76,10 @@ function tryCode() {
 }
 
 // ---- Join step 2: team name ----
-if (nameBtn && nameInput) {
-  nameBtn.addEventListener("click", tryJoinTeam);
-  nameInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") tryJoinTeam();
-  });
-}
+nameBtn?.addEventListener("click", tryJoinTeam);
+nameInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") tryJoinTeam();
+});
 
 function tryJoinTeam() {
   if (!joinedCode) {
@@ -117,18 +112,16 @@ function tryJoinTeam() {
 }
 
 // ---- Buzz ----
-if (buzzBtn) {
-  buzzBtn.addEventListener("click", () => {
-    if (!joined) return;
+buzzBtn?.addEventListener("click", () => {
+  if (!joined) return;
 
-    let audioPosition = null;
-    if (window.__grandprixAudio) {
-      audioPosition = window.__grandprixAudio.currentTime;
-    }
+  let audioPosition = null;
+  if (window.__grandprixAudio) {
+    audioPosition = window.__grandprixAudio.currentTime;
+  }
 
-    socket.emit("buzz", { audioPosition });
-  });
-}
+  socket.emit("buzz", { audioPosition });
+});
 
 socket.on("buzzed", (teamName) => {
   if (statusEl) statusEl.textContent = `${teamName} buzzede først!`;
@@ -146,14 +139,11 @@ function renderLeaderboard(teams) {
   if (!teamListEl) return;
 
   const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0)) {
-      return (b.points ?? 0) - (a.points ?? 0);
-    }
+    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
   });
 
   teamListEl.innerHTML = "";
-
   sorted.forEach((t, i) => {
     const li = document.createElement("li");
     li.className = "team-item";
@@ -167,7 +157,7 @@ function renderLeaderboard(teams) {
 
 // ---- Challenge render ----
 function renderChallenge(challenge) {
-  if (buzzBtn) buzzBtn.disabled = true;
+  buzzBtn && (buzzBtn.disabled = true);
 
   if (!challenge) {
     stopGrandprix();
@@ -180,7 +170,7 @@ function renderChallenge(challenge) {
   if (challengeTitle) challengeTitle.textContent = challenge.type || "Udfordring";
   if (challengeText) challengeText.textContent = challenge.text || "";
 
-  if (typeof challenge === "object" && challenge.type === "Nisse Grandprix") {
+  if (challenge.type === "Nisse Grandprix") {
     renderGrandprix(challenge, api);
     return;
   }
@@ -206,9 +196,7 @@ function showGrandprixPopup(startAtMs, seconds) {
 
     if (left <= 0) {
       clearInterval(gpPopupTimer);
-      setTimeout(() => {
-        gpPopup.style.display = "none";
-      }, 400);
+      setTimeout(() => (gpPopup.style.display = "none"), 400);
     }
   }
 
@@ -235,6 +223,7 @@ async function startMicToAdmin() {
 
     const offer = await gpTeamPC.createOffer();
     await gpTeamPC.setLocalDescription(offer);
+
     socket.emit("gp-webrtc-offer", { offer });
   } catch {
     api.showStatus("⚠️ Mikrofon kræver tilladelse.");
@@ -279,7 +268,6 @@ socket.on("state", (s) => {
 
   const isLockedGrandprix =
     ch &&
-    typeof ch === "object" &&
     ch.type === "Nisse Grandprix" &&
     ch.phase === "locked";
 
