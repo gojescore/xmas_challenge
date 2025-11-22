@@ -1,4 +1,4 @@
-// public/minigames/julekortet.js v3
+// public/minigames/julekortet.js v4
 
 let writingTimer = null;
 let popupEl = null;
@@ -125,12 +125,10 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       textarea.readOnly = true;
       sendBtn.disabled = true;
       statusEl.textContent = "✅ Kort sendt!";
+
       socket.emit("submitCard", text);
 
-      // hide popup after send (team screen)
-      setTimeout(() => {
-        popup.style.display = "none";
-      }, 600);
+      setTimeout(() => (popup.style.display = "none"), 600);
     }
 
     function autoSubmit() {
@@ -143,10 +141,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
       if (text) socket.emit("submitCard", text);
 
-      // hide popup after timeout
-      setTimeout(() => {
-        popup.style.display = "none";
-      }, 600);
+      setTimeout(() => (popup.style.display = "none"), 600);
     }
 
     return;
@@ -154,14 +149,15 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
   // --- VOTING PHASE ---
   if (ch.phase === "voting") {
-    // show popup again for all teams
     popup.style.display = "flex";
 
     textarea.style.display = "none";
     sendBtn.style.display = "none";
     timeLeftEl.parentElement.style.display = "none";
 
-    statusEl.textContent = "Afstemning i gang! Vælg jeres favoritkort.";
+    statusEl.textContent = hasVoted
+      ? "✅ Din stemme er afgivet!"
+      : "Afstemning i gang! Vælg jeres favoritkort.";
 
     const cards = ch.votingCards || [];
 
@@ -172,7 +168,8 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
     `;
 
     cards.forEach((c, i) => {
-      const isMine = c.ownerTeamName === myTeamName;
+      const owner = c.ownerTeamName;     // guaranteed by admin v31
+      const isMine = owner === myTeamName;
 
       const btn = document.createElement("button");
       btn.style.cssText = `
@@ -191,11 +188,12 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       btn.onclick = () => {
         if (hasVoted || isMine) return;
         hasVoted = true;
+
         socket.emit("vote", i);
+
         api.showStatus("✅ Din stemme er afgivet!");
         statusEl.textContent = "✅ Tak for din stemme!";
-        // disable all buttons
-        [...grid.querySelectorAll("button")].forEach(b => b.disabled = true);
+        [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
       };
 
       grid.appendChild(btn);
@@ -218,9 +216,6 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       ? `🎉 Vindere: ${winners.join(", ")}`
       : "🎉 Runden er slut!";
 
-    // hide after a few seconds
-    setTimeout(() => {
-      popup.style.display = "none";
-    }, 6000);
+    setTimeout(() => (popup.style.display = "none"), 6000);
   }
 }
