@@ -1,8 +1,4 @@
-// public/team.js v30
-// Fixes:
-// - Buzzing team always sees correct text + enabled input
-// - One typed GP answer per round per team
-// - JuleKortet: hide after submit; voting shows all; self-vote blocked
+// public/team.js v31
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -38,7 +34,11 @@ let joined = false;
 let joinedCode = null;
 let myTeamName = null;
 
-// per-round flags
+// Local Grandprix "I buzzed!" fallback
+let lastBuzzRoundId = null;
+let lastBuzzAt = 0;
+
+// per-round typed answer lock
 let gpAnsweredRoundId = null;
 let gpSentThisRound = false;
 
@@ -120,6 +120,10 @@ buzzBtn?.addEventListener("click", async () => {
     try { await window.__grandprixAudio.play(); } catch {}
   }
 
+  // local fallback marker for "I buzzed"
+  lastBuzzAt = Date.now();
+  lastBuzzRoundId = window.__currentRoundId || null;
+
   socket.emit("buzz");
 });
 
@@ -177,7 +181,10 @@ function ensureNisseGaadenAnswer() {
   ngBtn.onclick = () => {
     const text = (ngInput.value || "").trim();
     if (!text) return;
-    socket.emit("submitCard", text);
+
+    // send teamName explicitly
+    socket.emit("submitCard", { teamName: myTeamName, text });
+
     ngInput.value = "";
     api.showStatus("✅ Svar sendt til læreren.");
   };
@@ -324,6 +331,9 @@ function renderChallenge(ch) {
     return;
   }
 
+  // store round id for local buzz fallback
+  window.__currentRoundId = ch.id || null;
+
   challengeTitle.textContent = ch.type || "Udfordring";
   challengeText.textContent = ch.text || "";
 
@@ -366,11 +376,19 @@ socket.on("state", (s) => {
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
-  const iAmFirstBuzz =
+  // normal compare
+  let iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
+
+  // fallback: if I buzzed this round within last 8s, treat as first
+  if (!iAmFirstBuzz && isLockedGP) {
+    const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
+    const recent = Date.now() - lastBuzzAt < 8000;
+    if (sameRound && recent) iAmFirstBuzz = true;
+  }
 
   if (isLockedGP && ch.countdownStartAt) {
     showGrandprixPopup(
