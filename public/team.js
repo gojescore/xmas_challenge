@@ -1,6 +1,6 @@
 // public/team.js v31
 
-import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 
@@ -401,3 +401,4 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
