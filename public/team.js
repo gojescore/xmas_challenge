@@ -1,8 +1,8 @@
-// public/team.js (v28)
-// FIXES:
-// - Grandprix buzz enabled by minigame (phase names aligned)
-// - Pass socket into minigames (no globals)
-// - NisseGåden + JuleKortet stable
+// public/team.js v29
+// Fixes typing:
+// - Grandprix popup ALWAYS shows input in locked phase;
+//   only first-buzz team gets it enabled.
+// - JuleKortet textarea never disabled during writing (readOnly after).
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -28,10 +28,8 @@ const challengeText = el("challengeText");
 
 const buzzBtn = el("buzzBtn");
 const statusEl = el("status");
-
 const teamNameLabel = el("teamNameLabel");
 
-// Grandprix popup elements
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
 
@@ -114,19 +112,13 @@ function tryJoin() {
 buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
 
-  // unlock autoplay if needed
   if (window.__grandprixAudio && window.__grandprixAudio.paused) {
     try { await window.__grandprixAudio.play(); } catch {}
   }
 
-  const audioPosition = window.__grandprixAudio
-    ? window.__grandprixAudio.currentTime
-    : null;
-
-  socket.emit("buzz", { audioPosition });
+  socket.emit("buzz");
 });
 
-// admin stop => stop on team
 socket.on("gp-stop-audio-now", () => {
   stopGrandprix();
   api.clearMiniGame();
@@ -139,7 +131,8 @@ function renderLeaderboard(teams) {
   if (!teamListEl) return;
 
   const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
+    if ((b.points ?? 0) !== (a.points ?? 0))
+      return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
   });
 
@@ -170,12 +163,12 @@ function ensureNisseGaadenAnswer() {
   ngInput = document.createElement("input");
   ngInput.placeholder = "Skriv jeres svar her…";
   ngInput.style.cssText =
-    "font-size:1.1rem; padding:8px; width:260px;";
+    "font-size:1.2rem; padding:10px; width:320px;";
 
   ngBtn = document.createElement("button");
   ngBtn.textContent = "Send svar";
   ngBtn.style.cssText =
-    "font-size:1.1rem; padding:8px 12px; font-weight:700; cursor:pointer;";
+    "font-size:1.2rem; padding:10px 14px; font-weight:800; cursor:pointer;";
 
   ngBtn.onclick = () => {
     const text = (ngInput.value || "").trim();
@@ -194,6 +187,7 @@ function showNisseGaadenAnswer() {
   ngWrap.style.display = "flex";
   ngInput.disabled = false;
   ngBtn.disabled = false;
+  setTimeout(() => ngInput.focus(), 50);
 }
 
 function hideNisseGaadenAnswer() {
@@ -204,12 +198,13 @@ function hideNisseGaadenAnswer() {
 }
 
 // ===========================
-// GRANDPRIX POPUP
+// GRANDPRIX POPUP + INPUT
 // ===========================
 let gpPopupTimer = null;
 let gpAnswerInput = null;
 let gpAnswerBtn = null;
 let gpAnswerWrap = null;
+let gpNoteEl = null;
 
 function ensureGpAnswerUI() {
   if (!gpPopup) return;
@@ -221,8 +216,11 @@ function ensureGpAnswerUI() {
       display:flex;
       flex-direction:column;
       gap:10px;
-      width: min(520px, 92vw);
+      width:min(520px, 92vw);
     `;
+
+    gpNoteEl = document.createElement("div");
+    gpNoteEl.style.cssText = "font-size:1.1rem; font-weight:700; text-align:center;";
 
     gpAnswerInput = document.createElement("input");
     gpAnswerInput.placeholder = "Skriv jeres svar …";
@@ -255,25 +253,31 @@ function ensureGpAnswerUI() {
       api.showStatus("✅ Svar sendt til læreren.");
     };
 
-    gpAnswerWrap.append(gpAnswerInput, gpAnswerBtn);
+    gpAnswerWrap.append(gpNoteEl, gpAnswerInput, gpAnswerBtn);
     gpPopup.appendChild(gpAnswerWrap);
   }
 }
 
-function showGrandprixPopup(startAtMs, seconds, showAnswer) {
+function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz) {
   if (!gpPopup || !gpPopupCountdown) return;
-  if (gpPopupTimer) clearInterval(gpPopupTimer);
-
-  gpPopup.style.display = "flex";
 
   ensureGpAnswerUI();
 
-  if (gpAnswerWrap) {
-    gpAnswerWrap.style.display = showAnswer ? "flex" : "none";
-    if (gpAnswerInput) gpAnswerInput.disabled = !showAnswer;
-    if (gpAnswerBtn) gpAnswerBtn.disabled = !showAnswer;
-    if (showAnswer) gpAnswerInput.focus();
+  gpPopup.style.display = "flex";
+
+  // ALWAYS show inputs, but enable only for first-buzz team
+  if (iAmFirstBuzz) {
+    gpNoteEl.textContent = "Svar inden tiden udløber";
+    gpAnswerInput.disabled = false;
+    gpAnswerBtn.disabled = false;
+    setTimeout(() => gpAnswerInput.focus(), 80);
+  } else {
+    gpNoteEl.textContent = "Vent… et andet hold svarer nu";
+    gpAnswerInput.disabled = true;
+    gpAnswerBtn.disabled = true;
   }
+
+  if (gpPopupTimer) clearInterval(gpPopupTimer);
 
   function tick() {
     const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
@@ -283,6 +287,8 @@ function showGrandprixPopup(startAtMs, seconds, showAnswer) {
     if (left <= 0) {
       clearInterval(gpPopupTimer);
       gpPopupTimer = null;
+      gpAnswerInput.disabled = true;
+      gpAnswerBtn.disabled = true;
       setTimeout(hideGrandprixPopup, 600);
     }
   }
@@ -295,7 +301,6 @@ function hideGrandprixPopup() {
   if (gpPopupTimer) clearInterval(gpPopupTimer);
   gpPopupTimer = null;
   if (gpPopup) gpPopup.style.display = "none";
-  if (gpAnswerWrap) gpAnswerWrap.style.display = "none";
 }
 
 // ===========================
@@ -320,12 +325,10 @@ function renderChallenge(ch) {
   challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
-    // GP must persist across updates
-    renderGrandprix(ch, api, socket);
+    renderGrandprix(ch, api);
     return;
   }
 
-  // leaving GP
   stopGrandprix();
 
   if (ch.type === "NisseGåden") {
@@ -360,7 +363,7 @@ socket.on("state", (s) => {
     ch.type === "Nisse Grandprix" &&
     ch.phase === "locked";
 
-  const iAmBuzzedFirst =
+  const iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
@@ -370,7 +373,7 @@ socket.on("state", (s) => {
     showGrandprixPopup(
       ch.countdownStartAt,
       ch.countdownSeconds || 20,
-      iAmBuzzedFirst
+      iAmFirstBuzz
     );
   } else {
     hideGrandprixPopup();
