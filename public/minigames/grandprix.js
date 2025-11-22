@@ -1,358 +1,136 @@
 // public/minigames/grandprix.js
-// Team-side Nisse Grandprix
-// - synced start/resume using absolute timestamps
-// - big pre-start countdown overlay
-// - fallback "tap for sound" ONLY if autoplay is blocked
 
 let audio = null;
-let loadedUrl = null;
+let ui = {
+  preOverlay: null,
+  tapOverlay: null,
+};
 
-let startTimer = null;
-let resumeTimer = null;
-let lastPhase = null;
-
-// ---------- Overlay helpers (created dynamically) ----------
-let preOverlay = null;
-let preNumber = null;
-
-let tapOverlay = null;
-let tapWired = false;
-
+// Create overlay helpers
 function ensurePreOverlay() {
-  if (preOverlay) return;
-
-  preOverlay = document.createElement("div");
-  preOverlay.id = "gpPreOverlay";
-  preOverlay.style.cssText = `
-    position: fixed; inset: 0; z-index: 9998;
-    display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.8); color: white; text-align: center;
-    font-family: system-ui, sans-serif; padding: 20px;
+  if (ui.preOverlay) return ui.preOverlay;
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position:fixed; inset:0; z-index:9998;
+    display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.85); color:white; text-align:center;
+    font-family:system-ui,sans-serif;
   `;
-
-  const box = document.createElement("div");
-  box.style.cssText = `
-    background: rgba(0,0,0,0.25);
-    padding: 24px 28px; border-radius: 18px;
-    max-width: 520px; width: 100%;
+  el.innerHTML = `
+    <div>
+      <div style="font-size:2rem; font-weight:900; margin-bottom:8px;">
+        Musikken starter om
+      </div>
+      <div id="gpPreCountdown" style="font-size:6rem; font-weight:900;">3</div>
+    </div>
   `;
-
-  const title = document.createElement("div");
-  title.textContent = "🎵 Musikken starter om";
-  title.style.cssText = `
-    font-size: 2rem; font-weight: 900; margin-bottom: 8px;
-  `;
-
-  preNumber = document.createElement("div");
-  preNumber.textContent = "—";
-  preNumber.style.cssText = `
-    font-size: 6rem; font-weight: 900; line-height: 1;
-    margin: 6px 0 10px;
-  `;
-
-  const hint = document.createElement("div");
-  hint.textContent = "Hvis der ikke kommer lyd, tryk én gang på skærmen.";
-  hint.style.cssText = `
-    font-size: 1.1rem; opacity: 0.95;
-  `;
-
-  box.appendChild(title);
-  box.appendChild(preNumber);
-  box.appendChild(hint);
-  preOverlay.appendChild(box);
-
-  document.body.appendChild(preOverlay);
+  document.body.appendChild(el);
+  ui.preOverlay = el;
+  return el;
 }
 
-function showPreOverlay() {
-  ensurePreOverlay();
-  preOverlay.style.display = "flex";
+function ensureTapOverlay(onTap) {
+  if (ui.tapOverlay) return ui.tapOverlay;
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position:fixed; inset:0; z-index:9999;
+    display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.9); color:white; text-align:center;
+    font-family:system-ui,sans-serif; cursor:pointer;
+  `;
+  el.innerHTML = `
+    <div style="max-width:520px; padding:20px;">
+      <div style="font-size:2rem; font-weight:900; margin-bottom:10px;">
+        Tryk for lyd
+      </div>
+      <div style="font-size:1.2rem; opacity:0.9;">
+        (Browseren kræver et tryk før musik kan starte)
+      </div>
+      <div style="margin-top:14px; font-size:3rem;">🔊</div>
+    </div>
+  `;
+  el.addEventListener("click", onTap);
+  document.body.appendChild(el);
+  ui.tapOverlay = el;
+  return el;
 }
 
-function hidePreOverlay() {
-  if (preOverlay) preOverlay.style.display = "none";
+function hideAllOverlays() {
+  if (ui.preOverlay) ui.preOverlay.style.display = "none";
+  if (ui.tapOverlay) ui.tapOverlay.style.display = "none";
 }
 
-// Tap overlay only when autoplay fails
-function ensureTapOverlay() {
-  if (tapOverlay) return;
+export function stopGrandprix() {
+  hideAllOverlays();
 
-  tapOverlay = document.createElement("div");
-  tapOverlay.id = "gpTapOverlay";
-  tapOverlay.style.cssText = `
-    position: fixed; inset: 0; z-index: 9999;
-    display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.85); color: white; text-align: center;
-    font-family: system-ui, sans-serif; padding: 20px;
-  `;
-
-  const box = document.createElement("div");
-  box.style.cssText = `
-    padding: 24px 28px; border-radius: 18px;
-    max-width: 520px; width: 100%;
-  `;
-
-  const title = document.createElement("div");
-  title.textContent = "🔊 Tryk for lyd";
-  title.style.cssText = `
-    font-size: 2.4rem; font-weight: 900; margin-bottom: 8px;
-  `;
-
-  const text = document.createElement("div");
-  text.textContent = "Nogle enheder kræver et tryk før musikken må starte.";
-  text.style.cssText = `font-size: 1.2rem;`;
-
-  box.appendChild(title);
-  box.appendChild(text);
-  tapOverlay.appendChild(box);
-  document.body.appendChild(tapOverlay);
-}
-
-function showTapOverlay(onTap) {
-  ensureTapOverlay();
-  tapOverlay.style.display = "flex";
-
-  if (!tapWired) {
-    tapWired = true;
-    const handler = async () => {
-      try {
-        await onTap();
-        hideTapOverlay();
-      } catch {
-        // still blocked, keep overlay visible
-      }
-    };
-
-    tapOverlay.addEventListener("pointerdown", handler);
-    tapOverlay.addEventListener("keydown", handler);
+  if (audio) {
+    try { audio.pause(); } catch {}
+    try { audio.currentTime = 0; } catch {}
   }
+  audio = null;
+  window.__grandprixAudio = null;
 }
 
-function hideTapOverlay() {
-  if (tapOverlay) tapOverlay.style.display = "none";
-}
+export function renderGrandprix(challenge, api) {
+  stopGrandprix();
 
-// ---------- Timers ----------
-function clearTimers() {
-  if (startTimer) clearTimeout(startTimer);
-  if (resumeTimer) clearTimeout(resumeTimer);
-  startTimer = null;
-  resumeTimer = null;
-}
+  const startAt = challenge.startAt || Date.now();
+  const url = challenge.audioUrl;
 
-// ---------- Audio ----------
-function ensureAudio(url, api) {
-  if (!url) return null;
-
-  if (!audio || loadedUrl !== url) {
-    if (audio) {
-      try { audio.pause(); } catch {}
-    }
-    audio = new Audio(url);
-    audio.preload = "auto";
-    loadedUrl = url;
-
-    api.showStatus("🎵 Lyd klargøres…");
-  }
-
-  // expose for buzz timing
-  window.__grandprixAudio = audio;
-  return audio;
-}
-
-async function setTimeSafely(t) {
-  if (!audio) return;
-
-  if (audio.readyState >= 1) {
-    try { audio.currentTime = t; } catch {}
+  if (!url) {
+    api.showStatus("⚠️ Ingen lyd-URL for denne Grandprix.");
     return;
   }
 
-  await new Promise((resolve) => {
-    audio.addEventListener("loadedmetadata", resolve, { once: true });
-  });
+  audio = new Audio(url);
+  audio.preload = "auto";
+  window.__grandprixAudio = audio;
 
-  try { audio.currentTime = t; } catch {}
+  // Buzz enabled only while listening
+  api.setBuzzEnabled(challenge.phase === "listening");
+
+  // Pre-start countdown (3 sec sync)
+  const preOverlay = ensurePreOverlay();
+  const preCountdownEl = preOverlay.querySelector("#gpPreCountdown");
+  preOverlay.style.display = "flex";
+
+  const preSeconds = Math.max(0, Math.ceil((startAt - Date.now()) / 1000));
+  let remaining = preSeconds;
+
+  preCountdownEl.textContent = remaining;
+
+  const preTimer = setInterval(() => {
+    remaining -= 1;
+    preCountdownEl.textContent = Math.max(0, remaining);
+
+    if (remaining <= 0) {
+      clearInterval(preTimer);
+      preOverlay.style.display = "none";
+      startAudioWithAutoplayGuard(api);
+    }
+  }, 1000);
 }
 
-function computeStartSeconds(challenge) {
-  const now = Date.now();
-  const startAt = challenge.startAt || now;
-  const basePos = Number(challenge.audioPosition || 0);
-  const elapsed = Math.max(0, (now - startAt) / 1000);
-  return basePos + elapsed;
-}
-
-// Try to play; if blocked show tap overlay
-async function safePlay(api) {
+async function startAudioWithAutoplayGuard(api) {
   if (!audio) return;
 
   try {
     await audio.play();
-    hideTapOverlay();
-  } catch {
-    api.showStatus("🔊 Tryk for lyd for at starte musikken.");
-    showTapOverlay(async () => audio.play());
-  }
-}
+    api.showStatus("");
+  } catch (e) {
+    api.showStatus("⚠️ Kunne ikke starte lyd. Tryk for at starte.");
 
-// ---------- Pre-start / resume countdown ----------
-let preCountdownTimer = null;
-
-function startPreCountdown(targetAtMs, api, afterCountdownFn) {
-  ensurePreOverlay();
-  hideTapOverlay();
-  showPreOverlay();
-
-  if (preCountdownTimer) clearInterval(preCountdownTimer);
-
-  const tick = () => {
-    const now = Date.now();
-    const leftMs = Math.max(0, targetAtMs - now);
-    const leftSec = Math.ceil(leftMs / 1000);
-
-    preNumber.textContent = leftSec;
-
-    if (leftMs <= 0) {
-      clearInterval(preCountdownTimer);
-      preCountdownTimer = null;
-      hidePreOverlay();
-      afterCountdownFn?.();
-    }
-  };
-
-  tick();
-  preCountdownTimer = setInterval(tick, 100);
-}
-
-function stopPreCountdown() {
-  if (preCountdownTimer) clearInterval(preCountdownTimer);
-  preCountdownTimer = null;
-  hidePreOverlay();
-}
-
-// ---------- Scheduling ----------
-function scheduleStart(challenge, api) {
-  clearTimers();
-  stopPreCountdown();
-
-  const now = Date.now();
-  const startAt = challenge.startAt || now;
-
-  // show pre-countdown if start is in the future
-  if (startAt > now) {
-    startPreCountdown(startAt, api, async () => {
-      const t = computeStartSeconds(challenge);
-      await setTimeSafely(t);
-      safePlay(api);
+    const tapOverlay = ensureTapOverlay(async () => {
+      if (!audio) return;
+      try {
+        await audio.play();
+        tapOverlay.style.display = "none";
+        api.showStatus("");
+      } catch {
+        api.showStatus("⚠️ Kunne ikke starte lyd. Prøv igen.");
+      }
     });
-  } else {
-    // start immediately (late join)
-    (async () => {
-      const t = computeStartSeconds(challenge);
-      await setTimeSafely(t);
-      safePlay(api);
-    })();
+
+    tapOverlay.style.display = "flex";
   }
-
-  // also keep a safety timer in case interval drift
-  const delayMs = Math.max(0, startAt - now);
-  startTimer = setTimeout(async () => {
-    const t = computeStartSeconds(challenge);
-    await setTimeSafely(t);
-    safePlay(api);
-  }, delayMs);
-}
-
-function scheduleResume(challenge, api) {
-  clearTimers();
-  stopPreCountdown();
-
-  const now = Date.now();
-  const resumeAt = challenge.resumeAt || now;
-
-  if (resumeAt > now) {
-    startPreCountdown(resumeAt, api, async () => {
-      const basePos = Number(challenge.audioPosition || 0);
-      await setTimeSafely(basePos);
-      safePlay(api);
-    });
-  } else {
-    (async () => {
-      const basePos = Number(challenge.audioPosition || 0);
-      await setTimeSafely(basePos);
-      safePlay(api);
-    })();
-  }
-
-  const delayMs = Math.max(0, resumeAt - now);
-  resumeTimer = setTimeout(async () => {
-    const basePos = Number(challenge.audioPosition || 0);
-    await setTimeSafely(basePos);
-    safePlay(api);
-  }, delayMs);
-}
-
-// ---------- Stop ----------
-function stopAudio(api, msg) {
-  clearTimers();
-  stopPreCountdown();
-  hideTapOverlay();
-
-  if (audio) {
-    try { audio.pause(); } catch {}
-  }
-
-  api.setBuzzEnabled(false);
-  if (msg) api.showStatus(msg);
-}
-
-// ---------- RENDER ----------
-export function renderGrandprix(challenge, api) {
-  if (!challenge || typeof challenge !== "object") {
-    stopAudio(api, "Ingen Grandprix-data endnu.");
-    lastPhase = null;
-    return;
-  }
-
-  const { phase, audioUrl } = challenge;
-  ensureAudio(audioUrl, api);
-
-  if (phase === "listening") {
-    api.setBuzzEnabled(true);
-
-    if (lastPhase !== "listening") {
-      if (challenge.resumeAt) scheduleResume(challenge, api);
-      else scheduleStart(challenge, api);
-    }
-
-    api.showStatus("🎵 Lyt… tryk STOP når I kender svaret!");
-  }
-  else if (phase === "locked") {
-    stopAudio(api, "⛔ Et hold har trykket STOP! Vent på læreren…");
-  }
-  else if (phase === "ended") {
-    stopAudio(api, "✅ Runden er slut. Vent på næste udfordring.");
-  }
-  else {
-    stopAudio(api, "Vent på læreren…");
-  }
-
-  lastPhase = phase;
-}
-
-// ---------- Hard stop used by admin stop event / leaving Grandprix ----------
-export function stopGrandprix() {
-  clearTimers();
-  stopPreCountdown();
-  hideTapOverlay();
-
-  if (audio) {
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-    } catch {}
-  }
-
-  lastPhase = null;
 }
