@@ -36,6 +36,32 @@ const statusEl = el("status");
 
 const teamNameLabel = el("teamNameLabel");
 
+// ---- AUDIO UNLOCK BANNER ----
+const audioBanner = document.getElementById("audioUnlockBanner");
+const audioUnlockBtn = document.getElementById("audioUnlockBtn");
+
+function hideAudioBanner() {
+  if (audioBanner) audioBanner.style.display = "none";
+}
+
+// Hide banner on any first user gesture
+function setupAudioBannerAutoHide() {
+  const hide = () => {
+    hideAudioBanner();
+    document.removeEventListener("pointerdown", hide);
+    document.removeEventListener("keydown", hide);
+  };
+
+  document.addEventListener("pointerdown", hide, { once: true });
+  document.addEventListener("keydown", hide, { once: true });
+}
+
+if (audioUnlockBtn) {
+  audioUnlockBtn.addEventListener("click", hideAudioBanner);
+}
+setupAudioBannerAutoHide();
+
+
 // Grandprix popup
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
@@ -339,3 +365,4 @@ socket.on("state", (serverState) => {
     startMicToAdmin();
   }
 });
+
