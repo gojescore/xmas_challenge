@@ -47,6 +47,12 @@ function broadcastState() {
 // ------------------------------
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+socket.on("gp-typed-answer", ({ text }) => {
+  io.emit("gp-typed-answer", {
+    teamName: socket.teamName,
+    text
+  });
+});
 
   // Send current state to anyone who connects
   socket.emit("state", state);
@@ -217,3 +223,4 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
+
