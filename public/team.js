@@ -99,6 +99,8 @@ function tryJoinTeam() {
     myTeamName = res.team.name;
 
     joinMsg.textContent = `✅ I er nu med som: ${myTeamName}`;
+    document.getElementById("teamNameLabel").textContent = myTeamName;
+
     document.getElementById("teamNameLabel").textContent = `– ${myTeamName}`;
 
     document.getElementById("joinSection").style.display = "none";
@@ -223,4 +225,5 @@ function renderChallenge(challenge) {
 
   runMiniGame(type, challenge);
 }
+
 
