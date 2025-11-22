@@ -1,9 +1,9 @@
-// public/minigames/julekortet.js v2
-// Fix: textarea never disabled during writing. Only readOnly after submit/time.
-// socket is passed in from team.js.
+// public/minigames/julekortet.js v3
 
 let writingTimer = null;
 let popupEl = null;
+let hasSubmitted = false;
+let hasVoted = false;
 
 function ensurePopup() {
   if (popupEl) return popupEl;
@@ -46,6 +46,7 @@ function ensurePopup() {
       ">Send kort</button>
 
       <p id="jkStatus" style="margin-top:8px; font-weight:800;"></p>
+      <div id="jkVoteWrap" style="margin-top:12px;"></div>
     </div>
   `;
 
@@ -58,12 +59,13 @@ export function stopJuleKortet(api) {
   writingTimer = null;
   if (popupEl) popupEl.remove();
   popupEl = null;
+  hasSubmitted = false;
+  hasVoted = false;
   api?.showStatus?.("");
 }
 
-export function renderJuleKortet(ch, api, socket) {
+export function renderJuleKortet(ch, api, socket, myTeamName) {
   api.setBuzzEnabled(false);
-
   const popup = ensurePopup();
   popup.style.display = "flex";
 
@@ -71,16 +73,24 @@ export function renderJuleKortet(ch, api, socket) {
   const textarea = popup.querySelector("#jkTextarea");
   const sendBtn = popup.querySelector("#jkSendBtn");
   const statusEl = popup.querySelector("#jkStatus");
+  const voteWrap = popup.querySelector("#jkVoteWrap");
 
-  // clear vote UI if old
-  const oldVote = popup.querySelector(".jk-vote-wrap");
-  if (oldVote) oldVote.remove();
+  voteWrap.innerHTML = "";
 
   // --- WRITING PHASE ---
   if (ch.phase === "writing") {
-    textarea.readOnly = false;
-    sendBtn.disabled = false;
-    statusEl.textContent = "";
+    hasVoted = false;
+
+    textarea.style.display = "block";
+    sendBtn.style.display = "inline-block";
+    timeLeftEl.parentElement.style.display = "block";
+
+    textarea.readOnly = hasSubmitted;
+    sendBtn.disabled = hasSubmitted;
+
+    statusEl.textContent = hasSubmitted
+      ? "✅ Kort sendt. Vent på afstemning…"
+      : "";
 
     const startAt = ch.writingStartAt;
     const total = ch.writingSeconds || 120;
@@ -98,11 +108,10 @@ export function renderJuleKortet(ch, api, socket) {
     }
 
     if (writingTimer) clearInterval(writingTimer);
-    writingTimer = setInterval(tick, 250);
+    if (!hasSubmitted) writingTimer = setInterval(tick, 250);
     tick();
 
-    // focus strongly
-    setTimeout(() => textarea.focus(), 80);
+    if (!hasSubmitted) setTimeout(() => textarea.focus(), 80);
 
     sendBtn.onclick = manualSubmit;
 
@@ -112,67 +121,106 @@ export function renderJuleKortet(ch, api, socket) {
         statusEl.textContent = "Skriv noget først 🙂";
         return;
       }
+      hasSubmitted = true;
       textarea.readOnly = true;
       sendBtn.disabled = true;
       statusEl.textContent = "✅ Kort sendt!";
       socket.emit("submitCard", text);
+
+      // hide popup after send (team screen)
+      setTimeout(() => {
+        popup.style.display = "none";
+      }, 600);
     }
 
     function autoSubmit() {
+      if (hasSubmitted) return;
+      hasSubmitted = true;
+
       const text = (textarea.value || "").trim();
       textarea.readOnly = true;
       sendBtn.disabled = true;
 
-      if (text) {
-        socket.emit("submitCard", text);
-        statusEl.textContent = "⏳ Tiden er gået — dit kort er sendt!";
-      } else {
-        statusEl.textContent = "⏳ Tiden er gået — ingen tekst sendt.";
-      }
+      if (text) socket.emit("submitCard", text);
+
+      // hide popup after timeout
+      setTimeout(() => {
+        popup.style.display = "none";
+      }, 600);
     }
+
+    return;
   }
 
   // --- VOTING PHASE ---
   if (ch.phase === "voting") {
-    textarea.readOnly = true;
-    sendBtn.disabled = true;
-    timeLeftEl.textContent = "0";
+    // show popup again for all teams
+    popup.style.display = "flex";
+
+    textarea.style.display = "none";
+    sendBtn.style.display = "none";
+    timeLeftEl.parentElement.style.display = "none";
+
     statusEl.textContent = "Afstemning i gang! Vælg jeres favoritkort.";
 
-    const cards = ch.cards || [];
+    const cards = ch.votingCards || [];
 
-    const voteWrap = document.createElement("div");
-    voteWrap.className = "jk-vote-wrap";
-    voteWrap.style.cssText = `
-      margin-top:12px; display:grid; gap:10px;
+    const grid = document.createElement("div");
+    grid.style.cssText = `
+      display:grid; gap:10px;
       grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
     `;
 
     cards.forEach((c, i) => {
-      const cardBox = document.createElement("button");
-      cardBox.style.cssText = `
+      const isMine = c.ownerTeamName === myTeamName;
+
+      const btn = document.createElement("button");
+      btn.style.cssText = `
         text-align:left; padding:10px; border-radius:12px;
         border:2px solid #d77; background:#fff; cursor:pointer;
-        font-size:1.1rem;
+        font-size:1.1rem; opacity:${isMine ? 0.45 : 1};
       `;
-      cardBox.innerHTML = `
+      btn.disabled = isMine || hasVoted;
+
+      btn.innerHTML = `
         <div style="font-weight:900;">Kort #${i + 1}</div>
         <div style="white-space:pre-wrap; margin-top:6px;">${c.text}</div>
+        ${isMine ? '<div style="margin-top:6px; font-weight:800;">(Dit kort)</div>' : ""}
       `;
-      cardBox.onclick = () => {
+
+      btn.onclick = () => {
+        if (hasVoted || isMine) return;
+        hasVoted = true;
         socket.emit("vote", i);
         api.showStatus("✅ Din stemme er afgivet!");
+        statusEl.textContent = "✅ Tak for din stemme!";
+        // disable all buttons
+        [...grid.querySelectorAll("button")].forEach(b => b.disabled = true);
       };
-      voteWrap.appendChild(cardBox);
+
+      grid.appendChild(btn);
     });
 
-    popup.querySelector(".jk-card").appendChild(voteWrap);
+    voteWrap.appendChild(grid);
+    return;
   }
 
   // --- ENDED ---
   if (ch.phase === "ended") {
-    textarea.readOnly = true;
-    sendBtn.disabled = true;
-    statusEl.textContent = "Runden er slut 🎉";
+    popup.style.display = "flex";
+
+    textarea.style.display = "none";
+    sendBtn.style.display = "none";
+    timeLeftEl.parentElement.style.display = "none";
+
+    const winners = ch.winners || [];
+    statusEl.textContent = winners.length
+      ? `🎉 Vindere: ${winners.join(", ")}`
+      : "🎉 Runden er slut!";
+
+    // hide after a few seconds
+    setTimeout(() => {
+      popup.style.display = "none";
+    }, 6000);
   }
 }
