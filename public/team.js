@@ -1,6 +1,10 @@
-// public/team.js (v23) — Grandprix popup includes answer field for buzzing team
+// public/team.js (v25)
+// - Grandprix stable (phase-aware, popup + typing for buzzing team)
+// - NisseGåden big-text mode handled INSIDE minigame
+// - Team can answer NisseGåden via text input
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
+import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -22,7 +26,7 @@ const buzzBtn = el("buzzBtn");
 const statusEl = el("status");
 const teamNameLabel = el("teamNameLabel");
 
-// Grandprix popup elements (already in your HTML)
+// Grandprix popup elements (must exist in team.html)
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
 
@@ -146,7 +150,7 @@ function renderLeaderboard(teams) {
 }
 
 // ===========================
-// NISSE GÅDEN answer (small box under text)
+// NISSEGÅDEN answer (small box under text)
 // ===========================
 let ngWrap = null, ngInput = null, ngBtn = null;
 
@@ -185,6 +189,7 @@ function showNisseGaadenAnswer() {
   ngInput.disabled = false;
   ngBtn.disabled = false;
 }
+
 function hideNisseGaadenAnswer() {
   if (!ngWrap) return;
   ngWrap.style.display = "none";
@@ -193,7 +198,7 @@ function hideNisseGaadenAnswer() {
 }
 
 // ===========================
-// GRANDPRIX POPUP (FULLSCREEN + answer for buzzing team)
+// GRANDPRIX POPUP (fullscreen + answer for buzzing team)
 // ===========================
 let gpPopupTimer = null;
 let gpAnswerInput = null;
@@ -253,7 +258,6 @@ function showGrandprixPopup(startAtMs, seconds, showAnswer) {
   if (!gpPopup || !gpPopupCountdown) return;
   if (gpPopupTimer) clearInterval(gpPopupTimer);
 
-  // make sure popup is true overlay
   gpPopup.style.display = "flex";
   gpPopup.style.flexDirection = "column";
   gpPopup.style.justifyContent = "center";
@@ -280,7 +284,6 @@ function showGrandprixPopup(startAtMs, seconds, showAnswer) {
       clearInterval(gpPopupTimer);
       gpPopupTimer = null;
 
-      // lock input when time out
       if (gpAnswerInput) gpAnswerInput.disabled = true;
       if (gpAnswerBtn) gpAnswerBtn.disabled = true;
 
@@ -306,6 +309,9 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
+  // ✅ always let minigames clean up their own UI modes
+  stopNisseGaaden(api);
+
   if (!ch) {
     stopGrandprix();
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -324,6 +330,7 @@ function renderChallenge(ch) {
 
   if (ch.type === "NisseGåden") {
     stopGrandprix();
+    renderNisseGaaden(ch, api);   // ✅ minigame enables big-text mode
     showNisseGaadenAnswer();
     return;
   }
@@ -357,10 +364,9 @@ socket.on("state", (s) => {
     ch.firstBuzz.teamName === myTeamName;
 
   if (isLockedGP && ch.countdownStartAt) {
-    // Everyone sees popup, but ONLY buzzing team sees input
     showGrandprixPopup(
       ch.countdownStartAt,
-      ch.countdownSeconds || 5,
+      ch.countdownSeconds || 20,
       iAmBuzzedFirst
     );
   } else {
