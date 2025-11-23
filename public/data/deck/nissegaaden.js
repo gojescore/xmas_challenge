@@ -1,18 +1,18 @@
 // public/data/deck/nissegaaden.js
 
-export const DECK = [
+export const nisseGaaden = [
   {
     id: "ng1",
     type: "NisseGåden",
     title: "NisseGåden 1",
-    text: "Jeg er lille og grøn, elsker at hoppe. Hvad er jeg?",
+    text: "Hvad går gennem byen uden at røre en eneste snefnug?",
     used: false
   },
   {
     id: "ng2",
     type: "NisseGåden",
     title: "NisseGåden 2",
-    text: "Hvad vejer mest? 1 kg fjer eller 1 kg sten?",
+    text: "Hvad bliver vådere, jo mere det tørrer?",
     used: false
   },
   {
