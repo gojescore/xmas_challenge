@@ -1,5 +1,6 @@
-// server.js v34 (stable gameCode + joinGame)
-// Keeps your existing minigame events intact.
+// server.js v36
+// Backward compatible: joinGame + joinTeam both work.
+// Safe gameCode guard so admin sync can’t wipe it.
 
 const express = require("express");
 const app = express();
@@ -31,7 +32,6 @@ let state = {
   currentChallenge: null,
 };
 
-// helper
 const normalize = (s) => (s || "").trim().toLowerCase();
 const makeCode = () => String(Math.floor(1000 + Math.random() * 9000));
 
@@ -40,50 +40,48 @@ const makeCode = () => String(Math.floor(1000 + Math.random() * 9000));
 // --------------------
 io.on("connection", (socket) => {
   console.log("New client:", socket.id);
-
-  // Always send current state on connect
   socket.emit("state", state);
 
-  // ADMIN syncs full state
+  // ADMIN updates whole state
   socket.on("updateState", (incoming) => {
     if (!incoming || typeof incoming !== "object") return;
 
-    // ✅ Guard: never wipe gameCode unless admin sends a real one
-    if (incoming.gameCode !== undefined && incoming.gameCode !== null && incoming.gameCode !== "") {
-      state.gameCode = String(incoming.gameCode);
+    // ✅ Never wipe gameCode unless a real one is sent
+    if (
+      incoming.gameCode !== undefined &&
+      incoming.gameCode !== null &&
+      String(incoming.gameCode).trim() !== ""
+    ) {
+      state.gameCode = String(incoming.gameCode).trim();
     }
 
-    // Accept teams if provided
-    if (Array.isArray(incoming.teams)) {
-      state.teams = incoming.teams;
-    }
-
-    // Accept deck if provided and not empty
-    if (Array.isArray(incoming.deck) && incoming.deck.length > 0) {
-      state.deck = incoming.deck;
-    }
-
-    // Accept currentChallenge (can be null)
-    if (incoming.currentChallenge !== undefined) {
-      state.currentChallenge = incoming.currentChallenge;
-    }
+    if (Array.isArray(incoming.teams)) state.teams = incoming.teams;
+    if (Array.isArray(incoming.deck) && incoming.deck.length > 0) state.deck = incoming.deck;
+    if (incoming.currentChallenge !== undefined) state.currentChallenge = incoming.currentChallenge;
 
     io.emit("state", state);
   });
 
-  // Optional explicit start (admin can use or ignore)
+  // ADMIN starts new game
   socket.on("startGame", (ack) => {
     state.gameCode = makeCode();
     state.teams = [];
     state.currentChallenge = null;
+
+    console.log("Game started. Code:", state.gameCode);
     io.emit("state", state);
+
     if (typeof ack === "function") ack({ ok: true, gameCode: state.gameCode });
   });
 
-  // TEAMS join by code + name
-  socket.on("joinGame", ({ code, teamName }, ack) => {
+  // --------------------
+  // JOIN HANDLERS (both)
+  // --------------------
+  function handleJoin({ code, teamName }, ack) {
     const c = String(code || "").trim();
     const n = String(teamName || "").trim();
+
+    console.log("Join attempt:", { code: c, teamName: n, serverCode: state.gameCode });
 
     if (!state.gameCode || c !== state.gameCode) {
       if (typeof ack === "function") ack({ ok: false, message: "Forkert kode" });
@@ -100,27 +98,35 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const team = { id: "t" + Date.now() + Math.random(), name: n, points: 0 };
+    const team = { id: "t" + Date.now(), name: n, points: 0 };
     state.teams.push(team);
 
     socket.teamName = n;
 
     io.emit("state", state);
     if (typeof ack === "function") ack({ ok: true, team });
+  }
+
+  // New event name
+  socket.on("joinGame", handleJoin);
+
+  // Old event name (fallback)
+  socket.on("joinTeam", (teamName, ack) => {
+    handleJoin({ code: state.gameCode, teamName }, ack);
   });
 
-  // Grandprix buzz
+  // --------------------
+  // Gameplay events
+  // --------------------
   socket.on("buzz", () => {
-    const who = socket.teamName || socket.team || "Ukendt hold";
+    const who = socket.teamName || "Ukendt hold";
     io.emit("buzzed", who);
   });
 
-  // Typed GP answer (team -> admin)
   socket.on("gp-typed-answer", (payload) => {
     io.emit("gp-typed-answer", payload);
   });
 
-  // Cards (NisseGåden + JuleKortet)
   socket.on("submitCard", (payload) => {
     let teamName, text;
 
@@ -136,9 +142,9 @@ io.on("connection", (socket) => {
     io.emit("newCard", { teamName, text });
   });
 
-  // Photos (KreaNissen)
   socket.on("submitPhoto", (payload) => {
     let teamName, filename;
+
     if (typeof payload === "string") {
       teamName = socket.teamName;
       filename = payload;
@@ -151,23 +157,20 @@ io.on("connection", (socket) => {
     io.emit("newPhoto", { teamName, filename });
   });
 
-  // Votes (JK + KN)
   socket.on("vote", (index) => {
     const voter = socket.teamName || "Ukendt hold";
     io.emit("voteUpdate", { voter, index });
   });
 
-  // Admin stop GP audio everywhere
   socket.on("gp-stop-audio-now", () => {
     io.emit("gp-stop-audio-now");
   });
 
   socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+    console.log("Disconnected:", socket.id);
   });
 });
 
-// Root
 app.get("/", (req, res) => res.send("Xmas Challenge Server Running"));
 
 const PORT = process.env.PORT || 3000;
