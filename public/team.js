@@ -324,6 +324,13 @@ function renderChallenge(ch) {
 
   stopNisseGaaden(api);
   stopJuleKortet(api);
+  stopKreaNissen(api);
+
+  if (ch.type === "KreaNissen") {
+  renderKreaNissen(ch, api, socket, myTeamName);
+  return;
+}
+
 
   if (!ch) {
     stopGrandprix();
@@ -403,5 +410,6 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
 
 
