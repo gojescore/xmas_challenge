@@ -490,10 +490,10 @@ body {
 
 /* Your main white "surface" */
 .app, .main-panel, .sidebar, .current-challenge {
-  background: rgba(255, 248, 230, 0.95); /* gingerbread beige */
+  background: rgba(240, 247, 255, 0.92); /* icy blue white */
   color: #111;
-  border-radius: 14px;
 }
+
 
 
 /* If you have specific containers that were white, add them here too */
@@ -521,6 +521,7 @@ body {
 #kreanissenPopup {
   z-index: 9997; /* you already use high values, this keeps it safe */
 }
+
 
 
 
