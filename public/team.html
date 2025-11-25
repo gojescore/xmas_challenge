@@ -5,8 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Team</title>
   <link rel="stylesheet" href="style.css?v=12" />
+  <style>
+    /* Snow canvas behind everything, no clicks blocked */
+    #snowLayer {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Make sure the app is above snow */
+    .app {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Popups stay on top of everything */
+    #grandprixPopup,
+    #julekortPopup,
+    #kreanissenPopup {
+      z-index: 9997;
+    }
+  </style>
 </head>
 <body>
+  <!-- SNOW CANVAS -->
   <canvas id="snowLayer"></canvas>
 
   <div class="app">
@@ -69,7 +94,8 @@
 
         <!-- Grandprix answer popup -->
         <div id="grandprixPopup" style="
-          position:fixed; inset:0; z-index:9997;
+          position:fixed; inset:0;
+          z-index:9997;
           display:none; align-items:center; justify-content:center;
           background:rgba(0,0,0,0.85); color:white; text-align:center;
           font-family:system-ui,sans-serif;
@@ -94,21 +120,65 @@
     </main>
   </div>
 
+  <!-- SCRIPTS -->
   <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="team.js?v=37"></script>
-  <script src="snow.js?v=1"></script>
+  <script type="module" src="team.js?v=35"></script>
 
+  <!-- Inline snow script: NO game logic touched -->
+  <script>
+    (function () {
+      const canvas = document.getElementById("snowLayer");
+      if (!canvas || !canvas.getContext) return;
+
+      const ctx = canvas.getContext("2d");
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resize();
+      window.addEventListener("resize", resize);
+
+      const flakes = [];
+      const FLAKE_COUNT = 120;
+
+      for (let i = 0; i < FLAKE_COUNT; i++) {
+        flakes.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          r: Math.random() * 3 + 1,
+          speed: Math.random() * 1.2 + 0.4,
+          drift: Math.random() * 0.6 - 0.3,
+          opacity: Math.random() * 0.6 + 0.2
+        });
+      }
+
+      function loop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (const f of flakes) {
+          f.y += f.speed;
+          f.x += f.drift;
+
+          if (f.y > canvas.height) {
+            f.y = -5;
+            f.x = Math.random() * canvas.width;
+          }
+          if (f.x > canvas.width) f.x = 0;
+          if (f.x < 0) f.x = canvas.width;
+
+          ctx.globalAlpha = f.opacity;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+          ctx.fillStyle = "white";
+          ctx.fill();
+        }
+
+        requestAnimationFrame(loop);
+      }
+
+      loop();
+    })();
+  </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
