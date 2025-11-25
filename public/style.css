@@ -490,9 +490,10 @@ body {
 
 /* Your main white "surface" */
 .app, .main-panel, .sidebar, .current-challenge {
-  background: rgba(240, 247, 255, 0.92); /* icy blue white */
+  background: rgba(255, 252, 245, 0.95); /* soft card paper */
   color: #111;
 }
+
 
 
 
@@ -521,6 +522,7 @@ body {
 #kreanissenPopup {
   z-index: 9997; /* you already use high values, this keeps it safe */
 }
+
 
 
 
