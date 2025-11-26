@@ -1,6 +1,7 @@
-// public/main.js v34
+// public/main.js v34+facit
 // Aligned with team.js v31+ and grandprix/julekortet/nissegaaden working versions.
 // Adds KreaNissen deck + admin flow WITHOUT touching existing minigame logic.
+// Now also shows NisseGåden "facit" for the teacher if deck has `answer`.
 
 // =====================================================
 // SOCKET
@@ -197,6 +198,7 @@ function renderDeck() {
         startAdminCreatingTimer();
       }
       else if (card.type === "NisseGåden") {
+        // answer (if present on card) is kept as is
         currentChallenge = { ...card, answers: [] };
       }
       else {
@@ -337,6 +339,15 @@ function renderMiniGameArea() {
         `;
         wrap.appendChild(box);
       });
+    }
+
+    // ✅ Teacher-only solution text (if deck card has `answer`)
+    if (currentChallenge.answer) {
+      const sol = document.createElement("p");
+      sol.style.cssText =
+        "margin-top:8px; font-weight:800; color:#b11111;";
+      sol.textContent = `Facit (kun til dig): ${currentChallenge.answer}`;
+      wrap.appendChild(sol);
     }
 
     miniGameArea.appendChild(wrap);
@@ -871,7 +882,6 @@ socket.on("gp-typed-answer", ({ teamName, text }) => {
 });
 
 // ---- Shared "newCard" from server (NisseGåden + JuleKortet)
-// (kept 100% as before)
 socket.on("newCard", ({ teamName, text }) => {
   if (!currentChallenge) return;
 
@@ -890,7 +900,6 @@ socket.on("newCard", ({ teamName, text }) => {
 });
 
 // ---- KreaNissen photo submit ----
-// Server should broadcast {teamName, filename} on "newPhoto"
 socket.on("newPhoto", ({ teamName, filename }) => {
   if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
   if (currentChallenge.phase !== "creating") return;
