@@ -12,7 +12,7 @@ body {
   /* Gentle blue sky with snowy hill */
   background:
     radial-gradient(circle at bottom, #ffffff 0%, #def1ff 40%, transparent 70%),
-    linear-gradient(to bottom, #d8efff, #a7d4ff 70%, #1e14e1 100%);
+    linear-gradient(to top, #d8efff, #a7d4ff 70%, #1e14e1 100%);
 
   min-height: 100vh;
   display: flex;
@@ -448,6 +448,7 @@ body.nissegaaden-mode #challengeText {
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
 }
+
 
 
 
