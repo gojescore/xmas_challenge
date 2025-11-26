@@ -323,7 +323,7 @@ function renderCurrentChallenge() {
   }
 
   if (facitLine) {
-    facitLine.textContent = facitText ? `Facit / lærer-note: ${facitText}` : "";
+    facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
   }
 }
 
@@ -994,3 +994,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
