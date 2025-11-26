@@ -5,6 +5,7 @@ export const grandprixDeck = [
     id: "gp1",
     type: "Nisse Grandprix",
     title: "Grandprix 1",
+    text: "Eleverne lytter til julesangen. De trykker BUZZ, når de kender titlen, og siger den højt.", // 👈 opgave-tekst
     audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
     used: false
   },
@@ -12,8 +13,8 @@ export const grandprixDeck = [
     id: "gp2",
     type: "Nisse Grandprix",
     title: "Grandprix 2",
+    text: "Igen: lyt til julesangen. Tryk BUZZ, når I kan titlen, og sig den højt.", // 👈 opgave-tekst
     audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/SorenBanjo.mp3",
     used: false
   }
-
 ];
