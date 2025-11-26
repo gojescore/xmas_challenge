@@ -62,6 +62,31 @@ h2 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: linear-gradient(135deg, #b11111, #e53935, #ffb74d);
+  padding: 10px 16px;
+  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+}
+
+/* Little glowing dots like Christmas lights */
+.app-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255,255,255,0.65) 0, transparent 50%),
+    radial-gradient(circle at 80% 30%, rgba(255,255,255,0.4) 0, transparent 55%),
+    radial-gradient(circle at 40% 80%, rgba(255,255,255,0.55) 0, transparent 55%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.app-header .header-main,
+.app-header .game-code-box {
+  position: relative; /* keep content above the glow layer */
+  z-index: 1;
 }
 
 .reset-btn {
@@ -88,7 +113,6 @@ h2 {
   color: #ffffff; /* brighter for contrast */
   text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6); /* stronger shadow for readability */
 }
-
 
 /* ---------------------------------------------------------
    NISSEGÅDEN BIG TEXT MODE
@@ -196,10 +220,11 @@ body.nissegaaden-mode #challengeText {
   color: #555;
 }
 
-/* Challenge controls */
+/* Challenge controls – CENTERED BUTTONS */
 .challenge-controls {
   display: flex;
   align-items: center;
+  justify-content: center;   /* center Ja / Nej / Ikke fuldført */
   gap: 12px;
   margin-bottom: 6px;
   flex-wrap: wrap;
@@ -247,6 +272,22 @@ body.nissegaaden-mode #challengeText {
   text-align: left;
 }
 
+/* FACIT text styling */
+.facit-text {
+  color: #b11111;     /* Christmas red */
+  font-weight: 700;
+}
+
+/* Facit line under the challenge */
+#facitLine {
+  font-size: 1.3rem;       /* larger */
+  font-weight: 700;        /* bold */
+  color: #b11111;          /* Christmas red */
+  text-align: center;      /* centered */
+  margin-top: 10px;
+  display: block;
+}
+
 /* ---------------------------------------------------------
    SIDEBAR
 --------------------------------------------------------- */
@@ -280,6 +321,7 @@ body.nissegaaden-mode #challengeText {
   border-color: #4caf50;
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
 }
+
 /* Score number spacing between + and - */
 .team-points {
   display: flex;
@@ -295,6 +337,22 @@ body.nissegaaden-mode #challengeText {
   font-weight: 700;
 }
 
+/* Plus / minus button styling (restored) */
+.team-points button {
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.8rem;
+  background: #eee;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.team-points button:hover {
+  background: #ddd;
+}
 
 /* ---------------------------------------------------------
    MOBILE RESPONSIVE
@@ -334,38 +392,6 @@ body.nissegaaden-mode #challengeText {
 #julekortPopup,
 #kreanissenPopup {
   z-index: 9997;
-}
-
-/* =============================
-   FANCY CHRISTMAS HEADER BANNER
-   ============================= */
-
-.app-header {
-  background: linear-gradient(135deg, #b11111, #e53935, #ffb74d);
-  padding: 10px 16px;
-  border-radius: 14px;
-  position: relative;
-  overflow: hidden;
-  color: #fff;
-}
-
-/* Little glowing dots like Christmas lights */
-.app-header::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(circle at 10% 20%, rgba(255,255,255,0.65) 0, transparent 50%),
-    radial-gradient(circle at 80% 30%, rgba(255,255,255,0.4) 0, transparent 55%),
-    radial-gradient(circle at 40% 80%, rgba(255,255,255,0.55) 0, transparent 55%);
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.app-header .header-main,
-.app-header .game-code-box {
-  position: relative; /* keep content above the glow layer */
-  z-index: 1;
 }
 
 /* =============================
@@ -413,29 +439,9 @@ body.nissegaaden-mode #challengeText {
 .challenge-card:active,
 .challenge-controls button:active,
 .end-game:active,
-.reset-btn:active,
+reset-btn:active,
 .start-game-btn:active {
   transform: translateY(1px) scale(0.97);
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
-}
-
-.facit-text {
-  color: #b11111;     /* same Christmas red */
-  font-weight: 700;
-}
-
-/* FACIT text styling */
-#facitLine {
-  font-size: 1.3rem;       /* larger */
-  font-weight: 700;        /* bold */
-  color: #b11111;          /* Christmas red */
-  text-align: center;      /* centered */
-  margin-top: 10px;
-  display: block;
-}
-
-/* Center the Yes / No / Incomplete buttons */
-.challenge-controls {
-  justify-content: center !important;
 }
