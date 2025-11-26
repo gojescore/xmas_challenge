@@ -352,4 +352,16 @@ body.nissegaaden-mode #challengeText {
   z-index: 1;
 }
 
+/* =============================
+   CHRISTMAS BORDER PATTERN
+   ============================= */
+
+.current-challenge,
+.challenge-picker,
+.sidebar {
+  border: 3px solid transparent;
+  border-radius: 14px;
+  border-image: linear-gradient(45deg, #b11111, #2e7d32, #f9a825, #b11111) 1;
+}
+
 
