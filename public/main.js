@@ -834,6 +834,20 @@ endGameBtn.onclick = () => {
   syncToServer();
 };
 
+function reloadDeck() {
+  // Reload from your deck folders
+  deck = loadDeckSafely();
+  
+  // Send to server so teams get the updated deck
+  syncToServer();
+
+  // Update your UI
+  renderDeck();
+
+  alert("Udfordringer genindlæst!");
+}
+
+
 // =====================================================
 // Start game
 // =====================================================
@@ -987,3 +1001,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
