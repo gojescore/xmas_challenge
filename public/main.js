@@ -1,7 +1,7 @@
-// public/main.js v34+facit
+// public/main.js v34+facit+tasktext
 // Aligned with team.js v31+ and grandprix/julekortet/nissegaaden working versions.
 // Adds KreaNissen deck + admin flow WITHOUT touching existing minigame logic.
-// Now also shows NisseGåden "facit" for the teacher if deck has `answer`.
+// Also shows NisseGåden "facit" AND task description (text) for all challenges.
 
 // =====================================================
 // SOCKET
@@ -310,6 +310,16 @@ function renderMiniGameArea() {
       <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
       <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
     `;
+
+    // 👉 Teacher-only task description (if the card has text)
+    if (currentChallenge.text) {
+      const desc = document.createElement("p");
+      desc.style.cssText =
+        "margin-top:8px; font-weight:700; color:#333;";
+      desc.textContent = `Opgave-tekst: ${currentChallenge.text}`;
+      wrap.appendChild(desc);
+    }
+
     miniGameArea.appendChild(wrap);
     startAdminGpCountdownIfLocked();
     return;
@@ -341,11 +351,20 @@ function renderMiniGameArea() {
       });
     }
 
+    // 👉 Task description (riddle text), teacher view
+    if (currentChallenge.text) {
+      const desc = document.createElement("p");
+      desc.style.cssText =
+        "margin-top:8px; font-weight:700; color:#333;";
+      desc.textContent = `Opgave-tekst: ${currentChallenge.text}`;
+      wrap.appendChild(desc);
+    }
+
     // ✅ Teacher-only solution text (if deck card has `answer`)
     if (currentChallenge.answer) {
       const sol = document.createElement("p");
       sol.style.cssText =
-        "margin-top:8px; font-weight:800; color:#b11111;";
+        "margin-top:4px; font-weight:800; color:#b11111;";
       sol.textContent = `Facit (kun til dig): ${currentChallenge.answer}`;
       wrap.appendChild(sol);
     }
@@ -363,6 +382,15 @@ function renderMiniGameArea() {
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
+
+    // 👉 Task description from deck (text)
+    if (ch.text) {
+      const desc = document.createElement("p");
+      desc.style.cssText =
+        "margin:4px 0 10px; font-weight:700; color:#333;";
+      desc.textContent = `Opgave-tekst: ${ch.text}`;
+      wrap.appendChild(desc);
+    }
 
     if (ch.phase === "writing") {
       const p = document.createElement("p");
@@ -430,6 +458,15 @@ function renderMiniGameArea() {
       "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
 
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
+
+    // 👉 Task description (what to build / create)
+    if (ch.text) {
+      const desc = document.createElement("p");
+      desc.style.cssText =
+        "margin:4px 0 10px; font-weight:700; color:#064420;";
+      desc.textContent = `Opgave-tekst: ${ch.text}`;
+      wrap.appendChild(desc);
+    }
 
     if (ch.phase === "creating") {
       const p = document.createElement("p");
@@ -717,7 +754,7 @@ yesBtn.onclick = () => {
 };
 
 noBtn.onclick = () => {
-  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  if (!currentChallenge) return alert("Vælg en udfordring først.";
 
   // Grandprix NO resumes listening for everyone
   if (currentChallenge.type === "Nisse Grandprix") {
