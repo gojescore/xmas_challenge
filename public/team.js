@@ -1,7 +1,6 @@
 // public/team.js v38
 // Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen)
 
-// Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
@@ -41,12 +40,9 @@ let myTeamName = null;
 let lastBuzzRoundId = null;
 let lastBuzzAt = 0;
 
-// Grandprix typed answer lock
+// per-round typed answer lock (Grandprix)
 let gpAnsweredRoundId = null;
 let gpSentThisRound = false;
-
-// NisseGåden: remember if we already answered this riddle round
-let ngAnsweredRoundId = null;
 
 // ---------- Mini-game API ----------
 const api = {
@@ -61,11 +57,11 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
-  }
+  },
 };
 
 // ===========================
-// JOIN step 1 (enter code)
+// JOIN step 1 (game code)
 // ===========================
 codeBtn?.addEventListener("click", tryCode);
 codeInput?.addEventListener("keydown", (e) => {
@@ -86,7 +82,7 @@ function tryCode() {
 }
 
 // ===========================
-// JOIN step 2 (enter team name)
+// JOIN step 2 (team name)
 // ===========================
 nameBtn?.addEventListener("click", tryJoin);
 nameInput?.addEventListener("keydown", (e) => {
@@ -125,9 +121,12 @@ buzzBtn?.addEventListener("click", async () => {
   if (window.__grandprixAudio && window.__grandprixAudio.paused) {
     try {
       await window.__grandprixAudio.play();
-    } catch {}
+    } catch {
+      // ignore autoplay errors
+    }
   }
 
+  // local fallback marker for "I buzzed"
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
 
@@ -170,6 +169,7 @@ function renderLeaderboard(teams) {
 let ngWrap = null;
 let ngInput = null;
 let ngBtn = null;
+let ngSentThisRiddle = false; // <- only one send per riddle
 
 function ensureNisseGaadenAnswer() {
   if (ngWrap) return;
@@ -189,18 +189,26 @@ function ensureNisseGaadenAnswer() {
     "font-size:1.2rem; padding:10px 14px; font-weight:800; cursor:pointer;";
 
   ngBtn.onclick = () => {
+    if (ngSentThisRiddle) return; // already sent for this riddle
+
     const text = (ngInput.value || "").trim();
     if (!text) return;
 
+    ngSentThisRiddle = true;
+
     socket.emit("submitCard", { teamName: myTeamName, text });
 
-    // mark this runde as answered
-    ngAnsweredRoundId = window.__currentRoundId || null;
-
-    // clear + lock UI
     ngInput.value = "";
+    ngInput.disabled = true;
+    ngBtn.disabled = true;
+    ngWrap.style.display = "none"; // hide input after sending
+
     api.showStatus("✅ Svar sendt til læreren.");
-    hideNisseGaadenAnswer(); // "tilbage til startskærm" (ingen input mere)
+
+    // Give a clear "start screen" feeling after submit
+    if (challengeTitle) challengeTitle.textContent = "NisseGåden";
+    if (challengeText)
+      challengeText.textContent = "Svar sendt – vent på læreren…";
   };
 
   ngWrap.append(ngInput, ngBtn);
@@ -209,9 +217,14 @@ function ensureNisseGaadenAnswer() {
 
 function showNisseGaadenAnswer() {
   ensureNisseGaadenAnswer();
+
+  // New riddle => allow new answer
+  ngSentThisRiddle = false;
+  ngInput.value = "";
   ngWrap.style.display = "flex";
   ngInput.disabled = false;
   ngBtn.disabled = false;
+
   setTimeout(() => ngInput.focus(), 50);
 }
 
@@ -284,7 +297,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
-  // new round => reset lock
+  // new round => reset local one-answer lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -341,17 +354,17 @@ function renderChallenge(ch) {
   stopKreaNissen(api);
 
   if (!ch) {
-    challengeTitle.textContent = "Ingen udfordring endnu";
-    challengeText.textContent = "Vent på læreren…";
+    if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
+    if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
-  // store round id globally (also used by NisseGåden & GP fallback)
+  // store round id for local buzz fallback (Grandprix)
   window.__currentRoundId = ch.id || null;
 
-  challengeTitle.textContent = ch.type || "Udfordring";
-  challengeText.textContent = ch.text || "";
+  if (challengeTitle) challengeTitle.textContent = ch.type || "Udfordring";
+  if (challengeText) challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
     renderGrandprix(ch, api);
@@ -360,15 +373,7 @@ function renderChallenge(ch) {
 
   if (ch.type === "NisseGåden") {
     renderNisseGaaden(ch, api);
-
-    const alreadyAnswered =
-      ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
-
-    if (!alreadyAnswered) {
-      showNisseGaadenAnswer();
-    } else {
-      api.showStatus("✅ Svar sendt. Vent på læreren…");
-    }
+    showNisseGaadenAnswer();
     return;
   }
 
@@ -397,17 +402,20 @@ socket.on("state", (s) => {
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
+
   const isLockedGP =
     ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
+  // normal compare
   let iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
+  // fallback: if I buzzed this round within last 8s, treat as first
   if (!iAmFirstBuzz && isLockedGP) {
     const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
