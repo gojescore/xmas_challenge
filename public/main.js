@@ -754,7 +754,7 @@ yesBtn.onclick = () => {
 };
 
 noBtn.onclick = () => {
-  if (!currentChallenge) return alert("Vælg en udfordring først.";
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
 
   // Grandprix NO resumes listening for everyone
   if (currentChallenge.type === "Nisse Grandprix") {
@@ -997,3 +997,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
