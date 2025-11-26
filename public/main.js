@@ -295,37 +295,32 @@ function renderCurrentChallenge() {
     return;
   }
 
-  // 👇 Only show the title/type – NO "Aktuel udfordring:" prefix
+  // Show ONLY the challenge title
   const title = currentChallenge.title || currentChallenge.type;
   currentChallengeText.textContent = title;
 
-  // FACIT / teacher help text
-  let facitText = "";
+  // FACIT text — ALWAYS prefer challenge.answer
+  let facitText = currentChallenge.answer || "";
 
-  if (currentChallenge.type === "Nisse Grandprix") {
-    facitText =
-      currentChallenge.facit ||
-      currentChallenge.answer ||
-      "Eleverne lytter til sangen og buzzer, når de kender svaret.";
-  } else if (currentChallenge.type === "NisseGåden") {
-    facitText =
-      currentChallenge.facit ||
-      currentChallenge.answer ||
-      "Eleverne skal gætte gåden og skrive deres svar.";
-  } else if (currentChallenge.type === "JuleKortet") {
-    facitText =
-      currentChallenge.facit ||
-      "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
-  } else if (currentChallenge.type === "KreaNissen") {
-    facitText =
-      currentChallenge.facit ||
-      "Eleverne laver noget kreativt (fx nisse/juleby), tager et billede og sender det.";
+  // Fallback text ONLY if no "answer" exists in the deck
+  if (!facitText) {
+    if (currentChallenge.type === "Nisse Grandprix") {
+      facitText = "Eleverne lytter til sangen og buzzer, når de kender svaret.";
+    } else if (currentChallenge.type === "NisseGåden") {
+      facitText = "Eleverne skal gætte gåden og skrive deres svar.";
+    } else if (currentChallenge.type === "JuleKortet") {
+      facitText = "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
+    } else if (currentChallenge.type === "KreaNissen") {
+      facitText = "Eleverne laver noget kreativt og sender et billede.";
+    }
   }
 
+  // Write FACIT line
   if (facitLine) {
     facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
   }
 }
+
 
 // =====================================================
 // Admin minigame area
@@ -994,4 +989,5 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
 
