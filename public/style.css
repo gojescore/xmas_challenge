@@ -124,12 +124,14 @@ body.nissegaaden-mode #challengeTitle {
 }
 
 body.nissegaaden-mode #challengeText {
-  font-size: clamp(2.4rem, 4.5vw, 3.6rem);
+  font-size: clamp(1.8rem, 3.5vw, 2.8rem); /* smaller text */
   font-weight: 800;
   line-height: 1.25;
   text-align: center;
   margin-top: 12px;
+  color: #b11111; /* Christmas red */
 }
+
 
 /* ---------------------------------------------------------
    LAYOUT
@@ -445,3 +447,4 @@ reset-btn:active,
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
 }
+
