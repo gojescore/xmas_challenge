@@ -1,6 +1,6 @@
-// public/main.js v35 (with facit display)
-// Aligned with team.js v37 and grandprix/julekortet/nissegaaden/kreanissen.
-// Adds red facit/opgave text in admin panel without changing game logic.
+// public/main.js v34+facit
+// Aligned with team.js v31+ and grandprix/julekortet/nissegaaden working versions.
+// Adds KreaNissen deck + admin flow + small facit text on admin for all 4 types.
 
 // =====================================================
 // SOCKET
@@ -311,11 +311,11 @@ function renderMiniGameArea() {
       <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
     `;
 
-    // 🔴 Facit / opgave-tekst for Grandprix if provided in deck
-    if (ch.text) {
+    // 🔴 Optional facit on admin (small red line)
+    if (ch.answer) {
       const facitP = document.createElement("p");
       facitP.innerHTML =
-        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
       wrap.appendChild(facitP);
     }
 
@@ -334,11 +334,11 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
 
-    // 🔴 Show the riddle text / teacher opgave text if available
-    if (ch.text) {
+    // 🔴 Optional facit line (solution text)
+    if (ch.answer) {
       const facitP = document.createElement("p");
       facitP.innerHTML =
-        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
       wrap.appendChild(facitP);
     }
 
@@ -375,11 +375,11 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
-    // 🔴 Show the teacher's task text (card.text) in red
-    if (ch.text) {
+    // 🔴 Optional facit line / teacher note (same style as Grandprix/NisseGåden)
+    if (ch.answer) {
       const facitP = document.createElement("p");
       facitP.innerHTML =
-        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
       wrap.appendChild(facitP);
     }
 
@@ -450,11 +450,11 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
-    // 🔴 Show KreaNissen prompt text (card.text) in red
-    if (ch.text) {
+    // 🔴 Optional facit / teacher note line
+    if (ch.answer) {
       const facitP = document.createElement("p");
       facitP.innerHTML =
-        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
       wrap.appendChild(facitP);
     }
 
@@ -482,13 +482,13 @@ function renderMiniGameArea() {
       const photos = ch.votingPhotos || [];
       const votes = tallyVotes(ch.votes || {}, photos.length);
 
-      photos.forEach((pObj, i) => {
+      photos.forEach((p, i) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
-          <img src="/uploads/${pObj.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
+          <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
           <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
         `;
         wrap.appendChild(box);
