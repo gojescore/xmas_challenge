@@ -7,6 +7,7 @@ export const DECK = [
     type: "KreaNissen",
     title: "KreaNissen 1",
     text: "Lav den sjoveste nisse med ting i klassen. Tag et billede!",
+    answer: "Eleverne stemmer",
     used: false
   },
   {
@@ -14,6 +15,7 @@ export const DECK = [
     type: "KreaNissen",
     title: "KreaNissen 2",
     text: "Byg en mini-juleby på bordet. Tag et billede!",
+    answer: "Eleverne stemmer",
     used: false
   },
   {
@@ -21,6 +23,8 @@ export const DECK = [
     type: "KreaNissen",
     title: "KreaNissen 3",
     text: "Lav en kreativ julehat eller julefigur. Tag et billede!",
+    answer: "Eleverne stemmer",
     used: false
   }
 ];
+
