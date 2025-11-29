@@ -411,6 +411,44 @@ body.nissegaaden-mode #challengeText {
 }
 
 /* =============================
+   SCORE TOAST (POINTS MESSAGE)
+   ============================= */
+
+.score-toast {
+  position: fixed;
+  left: 50%;
+  top: 10%;
+  transform: translate(-50%, -10px);
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 800;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9995;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease;
+}
+
+.score-toast--gain {
+  background: linear-gradient(135deg, #2e7d32, #66bb6a);
+}
+
+.score-toast--loss {
+  background: linear-gradient(135deg, #b71c1c, #ef5350);
+}
+
+.score-toast--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+
+/* =============================
    SOFT JINGLE BUTTON ANIMATIONS
    ============================= */
 
@@ -449,6 +487,7 @@ body.nissegaaden-mode #challengeText {
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
 }
+
 
 
 
