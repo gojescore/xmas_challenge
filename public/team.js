@@ -48,6 +48,50 @@ let gpSentThisRound = false;
 // NisseGåden: remember if we already answered this riddle round
 let ngAnsweredRoundId = null;
 
+// ---------- SCORE TOAST (all teams see point changes) ----------
+let scoreToastEl = null;
+let scoreToastTimeout = null;
+
+function showScoreToast(teamName, delta) {
+  if (!scoreToastEl) {
+    scoreToastEl = document.createElement("div");
+    scoreToastEl.id = "scoreToast";
+    scoreToastEl.className = "score-toast";
+    document.body.appendChild(scoreToastEl);
+  }
+
+  // message text
+  const abs = Math.abs(delta);
+  const pointWord = abs === 1 ? "point" : "point";
+  const msg =
+    delta > 0
+      ? `${teamName} har fået ${abs} ${pointWord}!`
+      : `${teamName} har mistet ${abs} ${pointWord}!`;
+
+  // reset classes
+  scoreToastEl.className = "score-toast";
+  if (delta > 0) {
+    scoreToastEl.classList.add("score-toast--gain");
+  } else {
+    scoreToastEl.classList.add("score-toast--loss");
+  }
+
+  scoreToastEl.textContent = msg;
+
+  // force reflow so animation restarts
+  void scoreToastEl.offsetWidth;
+
+  scoreToastEl.classList.add("score-toast--show");
+
+  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
+
+  // hide again after 4 seconds
+  scoreToastTimeout = setTimeout(() => {
+    scoreToastEl.classList.remove("score-toast--show");
+  }, 4000);
+}
+
+
 // ---------- Mini-game API ----------
 const api = {
   setBuzzEnabled(enabled) {
@@ -424,3 +468,9 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
+// When points change, show a toast on all teams
+socket.on("points-toast", ({ teamName, delta }) => {
+  showScoreToast(teamName, delta);
+});
+
