@@ -1,4 +1,4 @@
-// public/main.js v35 (with facit line + reload deck button + point toasts)
+// public/main.js v36 (with facit line + reload deck button + score toast)
 
 // =====================================================
 // SOCKET
@@ -17,7 +17,7 @@ const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
 
 const currentChallengeText = document.getElementById("currentChallengeText");
-const facitLine = document.getElementById("facitLine"); // 👈 facit line
+const facitLine = document.getElementById("facitLine"); // 👈 facit line under challenge
 const yesBtn = document.getElementById("yesBtn");
 const noBtn = document.getElementById("noBtn");
 const incompleteBtn = document.getElementById("incompleteBtn");
@@ -42,51 +42,47 @@ let gameCode = null;
 
 const STORAGE_KEY = "xmasChallenge_admin_v35";
 
-// for toast diff detection
-let previousTeamsPoints = []; // [{ id, points }]
-
 // =====================================================
-// Toast helper for point changes
+// SCORE TOAST (same event as team.js)
 // =====================================================
-let toastTimeoutId = null;
+let scoreToastEl = null;
+let scoreToastTimeout = null;
 
-function showPointToast(message, isLoss = false) {
-  let toast = document.getElementById("pointToast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "pointToast";
-    toast.style.position = "fixed";
-    toast.style.left = "50%";
-    toast.style.bottom = "30px";
-    toast.style.transform = "translateX(-50%)";
-    toast.style.padding = "10px 18px";
-    toast.style.borderRadius = "999px";
-    toast.style.fontWeight = "800";
-    toast.style.fontSize = "1.1rem";
-    toast.style.color = "#fff";
-    toast.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
-    toast.style.opacity = "0";
-    toast.style.transition = "opacity 0.4s ease";
-    toast.style.zIndex = "9999";
-    toast.style.pointerEvents = "none";
-    document.body.appendChild(toast);
+function showScoreToast(teamName, delta) {
+  if (!scoreToastEl) {
+    scoreToastEl = document.createElement("div");
+    scoreToastEl.id = "scoreToast";
+    scoreToastEl.className = "score-toast";
+    document.body.appendChild(scoreToastEl);
   }
 
-  toast.textContent = message;
-  toast.style.background = isLoss
-    ? "rgba(183, 28, 28, 0.95)" // red for point loss
-    : "rgba(27, 94, 32, 0.95)"; // green for point gain
+  const abs = Math.abs(delta);
+  const pointWord = abs === 1 ? "point" : "point";
+  const msg =
+    delta > 0
+      ? `${teamName} har fået ${abs} ${pointWord}!`
+      : `${teamName} har mistet ${abs} ${pointWord}!`;
 
-  // force reflow so transition always plays
-  void toast.offsetWidth;
+  // reset base class
+  scoreToastEl.className = "score-toast";
 
-  toast.style.opacity = "1";
+  if (delta > 0) {
+    scoreToastEl.classList.add("score-toast--gain");
+  } else {
+    scoreToastEl.classList.add("score-toast--loss");
+  }
 
-  if (toastTimeoutId) clearTimeout(toastTimeoutId);
-  toastTimeoutId = setTimeout(() => {
-    toast.style.opacity = "0";
-    toastTimeoutId = null;
-  }, 4000);
+  scoreToastEl.textContent = msg;
+
+  // force reflow so animation restarts
+  void scoreToastEl.offsetWidth;
+
+  scoreToastEl.classList.add("score-toast--show");
+
+  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
+  scoreToastTimeout = setTimeout(() => {
+    scoreToastEl.classList.remove("score-toast--show");
+  }, 4000); // 4 seconds
 }
 
 // =====================================================
@@ -272,14 +268,9 @@ function renderDeck() {
 }
 
 // =====================================================
-// Leaderboard (NOW with toast detection)
+// Leaderboard
 // =====================================================
 function renderTeams() {
-  // map of previous points by id
-  const prevMap = new Map(
-    (previousTeamsPoints || []).map((t) => [t.id, t.points ?? 0])
-  );
-
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0))
       return (b.points ?? 0) - (a.points ?? 0);
@@ -287,8 +278,6 @@ function renderTeams() {
   });
 
   teamListEl.innerHTML = "";
-
-  const changedEvents = []; // { teamName, diff }
 
   sorted.forEach((team) => {
     const li = document.createElement("li");
@@ -306,7 +295,18 @@ function renderTeams() {
     minus.textContent = "−";
     minus.onclick = (e) => {
       e.stopPropagation();
-      team.points = Math.max(0, (team.points ?? 0) - 1);
+      const before = team.points ?? 0;
+      team.points = Math.max(0, before - 1);
+      const delta = team.points - before; // will be 0 or -1
+
+      if (delta !== 0) {
+        // tell server so ALL clients (main + teams) show toast
+        socket.emit("points-toast", {
+          teamName: team.name,
+          delta
+        });
+      }
+
       saveLocal();
       renderTeams();
       syncToServer();
@@ -319,7 +319,15 @@ function renderTeams() {
     plus.textContent = "+";
     plus.onclick = (e) => {
       e.stopPropagation();
-      team.points = (team.points ?? 0) + 1;
+      const before = team.points ?? 0;
+      team.points = before + 1;
+      const delta = team.points - before; // = +1
+
+      socket.emit("points-toast", {
+        teamName: team.name,
+        delta
+      });
+
       saveLocal();
       renderTeams();
       syncToServer();
@@ -334,30 +342,6 @@ function renderTeams() {
     };
 
     teamListEl.appendChild(li);
-
-    // ----- detect point change for this team -----
-    const prevPts = prevMap.has(team.id) ? prevMap.get(team.id) : null;
-    const curPts = team.points ?? 0;
-
-    if (prevPts !== null && curPts !== prevPts) {
-      const diff = curPts - prevPts;
-      changedEvents.push({ teamName: team.name, diff });
-    }
-  });
-
-  // store current points snapshot for next diff
-  previousTeamsPoints = sorted.map((t) => ({
-    id: t.id,
-    points: t.points ?? 0
-  }));
-
-  // show toasts AFTER DOM update
-  changedEvents.forEach(({ teamName, diff }) => {
-    if (diff > 0) {
-      showPointToast(`${teamName} har fået point!`, false);
-    } else if (diff < 0) {
-      showPointToast(`${teamName} har tabt point!`, true);
-    }
   });
 }
 
@@ -822,7 +806,12 @@ yesBtn.onclick = () => {
   stopGpAudioEverywhere();
 
   const t = teams.find((x) => x.id === selectedTeamId);
-  if (t) t.points = (t.points ?? 0) + 1;
+  if (t) {
+    const before = t.points ?? 0;
+    t.points = before + 1;
+    const delta = t.points - before; // +1
+    socket.emit("points-toast", { teamName: t.name, delta });
+  }
 
   currentChallenge = null;
   selectedTeamId = null;
@@ -843,8 +832,7 @@ noBtn.onclick = () => {
     if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
       const buzzingTeam = currentChallenge.firstBuzz.teamName;
 
-      currentChallenge.answeredTeams =
-        currentChallenge.answeredTeams || {};
+      currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
       currentChallenge.answeredTeams[buzzingTeam] = true;
 
       currentChallenge.phase = "listening";
@@ -1055,6 +1043,11 @@ socket.on("voteUpdate", ({ voter, index }) => {
   renderMiniGameArea();
   saveLocal();
   syncToServer();
+});
+
+// ---- Points toast from server (main also shows it) ----
+socket.on("points-toast", ({ teamName, delta }) => {
+  showScoreToast(teamName, delta);
 });
 
 // ---- Full state sync from server ----
