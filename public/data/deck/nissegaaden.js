@@ -10,26 +10,35 @@ export const nisseGaaden = [
   {
     id: "ng2",
     type: "NisseGåden",
-    title: "NisseGåden 2",
-    text: "Hvad bliver vådere, jo mere det tørrer?",
-    answer: "Et håndklæde",
+    title: "Hvad er jeg1?",
+    text: "Jeg er rund, jeg er kold, jeg er hvid",
+    answer: "En snebold",
     used: false
   },
   {
     id: "ng3",
     type: "NisseGåden",
-    title: "NisseGåden 3",
-    text: "Jeg har mange tænder, men kan ikke bide. Hvad er jeg?",
-    answer: "En kam",
+    title: "Hvad er jeg2?",
+    text: "Jeg kommer som regel i par, men ikke her. Typisk er jeg, hvor varmen er.",
+    answer: "En julesok",
     used: false
   },
   {
     id: "ng4",
     type: "NisseGåden",
-    title: "NisseGåden 4",
-    text: "Jeg kan flyve uden vinger og græde uden øjne. Hvad er jeg?",
-    answer: "En sky",
+    title: "Hvad er jeg3",
+    text: "Jeg er sød, jeg er rød og hvid. Jeg chiller på tit på en gren",
+    answer: "En sukkerstok",
+    used: false
+  },
+    {
+    id: "ng4",
+    type: "NisseGåden",
+    title: "Hvad er jeg4",
+    text: "Jeg ringer, men har ingen mobil. Jeg findes oftest i sølv eller guld!",
+    answer: "En sukkerstok",
     used: false
   }
 ];
+
 
