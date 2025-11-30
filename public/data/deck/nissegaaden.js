@@ -32,7 +32,7 @@ export const nisseGaaden = [
     used: false
   },
     {
-    id: "ng4",
+    id: "ng5",
     type: "NisseGåden",
     title: "Hvad er jeg (4)",
     text: "Jeg ringer, men har ingen mobil. Jeg findes oftest i sølv eller guld!",
@@ -40,7 +40,7 @@ export const nisseGaaden = [
     used: false
   },
       {
-    id: "ng4",
+    id: "ng6",
     type: "NisseGåden",
     title: "Emojisang (1)",
     text: "🔔🔔🔔",
@@ -48,7 +48,7 @@ export const nisseGaaden = [
     used: false
   },
   {
-    id: "ng4",
+    id: "ng7",
     type: "NisseGåden",
     title: "Emojisang (2)",
     text: "🕯️👶🌟🐄🐑",
@@ -56,7 +56,7 @@ export const nisseGaaden = [
     used: false
   },
   {
-    id: "ng4",
+    id: "ng8",
     type: "NisseGåden",
     title: "Emojisang (3)",
     text: "🦌🔴👃🎅🎵",
@@ -64,7 +64,7 @@ export const nisseGaaden = [
     used: false
   },
         {
-    id: "ng4",
+    id: "ng9",
     type: "NisseGåden",
     title: "Emojisang (4)",
     text: "🧊🚶‍♂️💔",
@@ -73,6 +73,7 @@ export const nisseGaaden = [
   }
 
 ];
+
 
 
 
