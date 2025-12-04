@@ -141,6 +141,8 @@ async function loadDeckSafely() {
   let ng = [];
   let jk = [];
   let kn = [];
+  let bq = []; // 👈 nyt billede-quiz deck
+
 
   try {
     const m = await import("./data/deck/grandprix.js?v=" + Date.now());
@@ -163,7 +165,15 @@ async function loadDeckSafely() {
     kn = m.DECK || m.kreaNissenDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn].map((c) => ({ ...c, used: !!c.used }));
+    // ✅ BilledeQuiz deck (public/data/deck/billedequiz.js exporting billedeQuizDeck)
+  try {
+    const m = await import("./data/deck/billedequiz.js?v=" + Date.now());
+    bq = m.DECK || m.billedeQuizDeck || m.deck || [];
+  } catch {}
+
+
+   deck = [...gp, ...ng, ...jk, ...kn, ...bq].map(c => ({ ...c, used: !!c.used }));
+
 
   renderDeck();
   renderTeams();
@@ -1079,3 +1089,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
