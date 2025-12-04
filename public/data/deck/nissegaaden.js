@@ -70,9 +70,18 @@ export const nisseGaaden = [
     text: "🧊🚶‍♂️💔",
     answer: "Last Christmas",
     used: false
+  },
+        {
+    id: "ng10",
+    type: "NisseGåden",
+    title: "NG - Hvilket tal?",
+    text: "Hvilket tal gik over scenen til morgensamlingen?",
+    answer: "4",
+    used: false
   }
 
 ];
+
 
 
 
