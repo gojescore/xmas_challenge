@@ -1,11 +1,12 @@
-// public/team.js v39
-// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen)
+// public/team.js v40
+// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen/BilledeQuiz)
 
 // Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
+import { renderBilledeQuiz, stopBilledeQuiz } from "./minigames/billedequiz.js";
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -101,6 +102,7 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
+    stopBilledeQuiz(api);   // 👈 make sure billedequiz is hidden too
   }
 };
 
@@ -379,6 +381,7 @@ function renderChallenge(ch) {
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
+  stopBilledeQuiz(api);     // 👈 also stop billedequiz
 
   if (!ch) {
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -421,6 +424,11 @@ function renderChallenge(ch) {
     return;
   }
 
+  if (ch.type === "BilledeQuiz") {
+    renderBilledeQuiz(ch, api);  // 👈 show picture + text
+    return;
+  }
+
   api.clearMiniGame();
 }
 
@@ -437,7 +445,7 @@ socket.on("state", (s) => {
 
   const ch = s.currentChallenge;
 
-  // ---------- NEW: Grandprix lock-out for teams that already answered wrong ----------
+  // ---------- Grandprix lock-out for teams that already answered wrong ----------
   if (ch && ch.type === "Nisse Grandprix") {
     const answeredTeams = ch.answeredTeams || {};
     const normalizeName = (x) => (x || "").trim().toLowerCase();
