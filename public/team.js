@@ -1,4 +1,4 @@
-// public/team.js v38
+// public/team.js v39
 // Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen)
 
 // Mini-games
@@ -6,8 +6,6 @@ import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
-import { renderBilledeQuiz, stopBilledeQuiz } from "./minigames/billedequiz.js";
-
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -62,7 +60,6 @@ function showScoreToast(teamName, delta) {
     document.body.appendChild(scoreToastEl);
   }
 
-  // message text
   const abs = Math.abs(delta);
   const pointWord = abs === 1 ? "point" : "point";
   const msg =
@@ -70,7 +67,6 @@ function showScoreToast(teamName, delta) {
       ? `${teamName} har fået ${abs} ${pointWord}!`
       : `${teamName} har mistet ${abs} ${pointWord}!`;
 
-  // reset classes
   scoreToastEl.className = "score-toast";
   if (delta > 0) {
     scoreToastEl.classList.add("score-toast--gain");
@@ -80,19 +76,17 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
-  // force reflow so animation restarts
+  // restart animation
   void scoreToastEl.offsetWidth;
 
   scoreToastEl.classList.add("score-toast--show");
 
   if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
 
-  // hide again after 4 seconds
   scoreToastTimeout = setTimeout(() => {
     scoreToastEl.classList.remove("score-toast--show");
   }, 4000);
 }
-
 
 // ---------- Mini-game API ----------
 const api = {
@@ -240,7 +234,7 @@ function ensureNisseGaadenAnswer() {
 
     socket.emit("submitCard", { teamName: myTeamName, text });
 
-    // mark this runde as answered
+    // mark this round as answered
     ngAnsweredRoundId = window.__currentRoundId || null;
 
     // clear + lock UI
@@ -379,14 +373,12 @@ function hideGrandprixPopup() {
 function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
-  
+
   // Stop all mini-games before switch
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
-  stopBilledeQuiz(api); // 👈 NY
-
 
   if (!ch) {
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -429,11 +421,6 @@ function renderChallenge(ch) {
     return;
   }
 
-    if (ch.type === "BilledeQuiz") {
-    renderBilledeQuiz(ch, api);
-    return;
-  }
-
   api.clearMiniGame();
 }
 
@@ -449,6 +436,23 @@ socket.on("state", (s) => {
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
+
+  // ---------- NEW: Grandprix lock-out for teams that already answered wrong ----------
+  if (ch && ch.type === "Nisse Grandprix") {
+    const answeredTeams = ch.answeredTeams || {};
+    const normalizeName = (x) => (x || "").trim().toLowerCase();
+    const me = normalizeName(myTeamName);
+
+    const alreadyAnswered = Object.keys(answeredTeams).some(
+      (name) => normalizeName(name) === me
+    );
+
+    // If this team already tried this round, BUZZ must stay disabled
+    if (alreadyAnswered) {
+      api.setBuzzEnabled(false);
+    }
+  }
+
   const isLockedGP =
     ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
 
@@ -482,5 +486,3 @@ socket.on("state", (s) => {
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
 });
-
-
