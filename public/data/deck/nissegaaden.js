@@ -78,9 +78,26 @@ export const nisseGaaden = [
     text: "Hvilket tal gik over scenen til morgensamlingen?",
     answer: "4",
     used: false
+  },
+          {
+    id: "ng11",
+    type: "NisseGåden",
+    title: "NC - Nisseudfordring1",
+    text: "Vælg en deltager, skriv hvem her, og send personen ned til kontoret. Vinderen af udfordringen får point.",
+    answer: "4",
+    used: false
+  },
+            {
+    id: "ng12",
+    type: "NisseGåden",
+    title: "NC - Nisseudfordring2",
+    text: "Vælg en deltager, skriv hvem her, og send personen ned til kontoret. Vinderen af udfordringen får point.",
+    answer: "4",
+    used: false
   }
 
 ];
+
 
 
 
