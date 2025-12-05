@@ -1,4 +1,6 @@
-// public/main.js v36 (with facit line + reload deck button + score toast)
+// public/main.js v37
+// Admin: Grandprix / NisseGåden / JuleKortet / KreaNissen / BilledeQuiz
+// + FACIT-linje + reload deck + score-toast
 
 // =====================================================
 // SOCKET
@@ -17,7 +19,7 @@ const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
 
 const currentChallengeText = document.getElementById("currentChallengeText");
-const facitLine = document.getElementById("facitLine"); // 👈 facit line under challenge
+const facitLine = document.getElementById("facitLine");
 const yesBtn = document.getElementById("yesBtn");
 const noBtn = document.getElementById("noBtn");
 const incompleteBtn = document.getElementById("incompleteBtn");
@@ -40,10 +42,10 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v35";
+const STORAGE_KEY = "xmasChallenge_admin_v37";
 
 // =====================================================
-// SCORE TOAST (same event as team.js)
+// SCORE TOAST (samme event som på team.js)
 // =====================================================
 let scoreToastEl = null;
 let scoreToastTimeout = null;
@@ -63,9 +65,7 @@ function showScoreToast(teamName, delta) {
       ? `${teamName} har fået ${abs} ${pointWord}!`
       : `${teamName} har mistet ${abs} ${pointWord}!`;
 
-  // reset base class
   scoreToastEl.className = "score-toast";
-
   if (delta > 0) {
     scoreToastEl.classList.add("score-toast--gain");
   } else {
@@ -74,7 +74,7 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
-  // force reflow so animation restarts
+  // restart animation
   void scoreToastEl.offsetWidth;
 
   scoreToastEl.classList.add("score-toast--show");
@@ -82,7 +82,7 @@ function showScoreToast(teamName, delta) {
   if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
   scoreToastTimeout = setTimeout(() => {
     scoreToastEl.classList.remove("score-toast--show");
-  }, 4000); // 4 seconds
+  }, 4000);
 }
 
 // =====================================================
@@ -117,7 +117,7 @@ function syncToServer() {
     teams,
     deck,
     currentChallenge,
-    gameCode
+    gameCode,
   });
 }
 
@@ -141,7 +141,7 @@ async function loadDeckSafely() {
   let ng = [];
   let jk = [];
   let kn = [];
-  let bq = []; // 👈 billede-quiz deck
+  let bq = [];
 
   try {
     const m = await import("./data/deck/grandprix.js?v=" + Date.now());
@@ -158,19 +158,20 @@ async function loadDeckSafely() {
     jk = m.DECK || m.juleKortetDeck || m.deck || [];
   } catch {}
 
-  // ✅ KreaNissen deck (public/data/deck/kreanissen.js exporting DECK)
   try {
     const m = await import("./data/deck/kreanissen.js?v=" + Date.now());
     kn = m.DECK || m.kreaNissenDeck || m.deck || [];
   } catch {}
 
-  // ✅ BilledeQuiz deck (public/data/deck/billedequiz.js exporting billedeQuizDeck)
   try {
     const m = await import("./data/deck/billedequiz.js?v=" + Date.now());
     bq = m.DECK || m.billedeQuizDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({ ...c, used: !!c.used }));
+  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({
+    ...c,
+    used: !!c.used,
+  }));
 
   renderDeck();
   renderTeams();
@@ -185,7 +186,6 @@ async function reloadDeck() {
   await loadDeckSafely();
 }
 
-// hook up reload button if present
 reloadDeckBtn?.addEventListener("click", reloadDeck);
 
 // =====================================================
@@ -227,7 +227,7 @@ function renderDeck() {
           countdownSeconds: 20,
           countdownStartAt: null,
           typedAnswer: null,
-          answeredTeams: {}
+          answeredTeams: {}, // teamName -> true (har svaret forkert / prøvet)
         };
       } else if (card.type === "JuleKortet") {
         currentChallenge = {
@@ -236,9 +236,9 @@ function renderDeck() {
           writingSeconds: 120,
           writingStartAt: Date.now(),
           cards: [], // [{ teamName, text }]
-          votingCards: [], // til voting-fasen
+          votingCards: [], // shuffled kopier
           votes: {}, // { voterTeamName: index }
-          winners: []
+          winners: [],
         };
         startAdminWritingTimer();
       } else if (card.type === "KreaNissen") {
@@ -250,13 +250,15 @@ function renderDeck() {
           photos: [], // [{ teamName, filename }]
           votingPhotos: [], // [{ filename, ownerTeamName }]
           votes: {}, // { voterTeamName: index }
-          winners: []
+          winners: [],
         };
         startAdminCreatingTimer();
       } else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
+      } else if (card.type === "BilledeQuiz") {
+        // billedequiz behøver kun selve kortet
+        currentChallenge = { ...card };
       } else {
-        // BilledeQuiz og evt. andre simple typer
         currentChallenge = { ...card };
       }
 
@@ -308,10 +310,7 @@ function renderTeams() {
       const delta = team.points - before; // 0 eller -1
 
       if (delta !== 0) {
-        socket.emit("points-toast", {
-          teamName: team.name,
-          delta
-        });
+        socket.emit("points-toast", { teamName: team.name, delta });
       }
 
       saveLocal();
@@ -328,12 +327,9 @@ function renderTeams() {
       e.stopPropagation();
       const before = team.points ?? 0;
       team.points = before + 1;
-      const delta = team.points - before; // = +1
+      const delta = team.points - before; // +1
 
-      socket.emit("points-toast", {
-        teamName: team.name,
-        delta
-      });
+      socket.emit("points-toast", { teamName: team.name, delta });
 
       saveLocal();
       renderTeams();
@@ -364,14 +360,11 @@ function renderCurrentChallenge() {
     return;
   }
 
-  // Show ONLY the challenge title
   const title = currentChallenge.title || currentChallenge.type;
   currentChallengeText.textContent = title;
 
-  // FACIT text — ALWAYS prefer challenge.answer
   let facitText = currentChallenge.answer || "";
 
-  // Fallback text ONLY if no "answer" exists in the deck
   if (!facitText) {
     if (currentChallenge.type === "Nisse Grandprix") {
       facitText =
@@ -384,7 +377,7 @@ function renderCurrentChallenge() {
     } else if (currentChallenge.type === "KreaNissen") {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
     } else if (currentChallenge.type === "BilledeQuiz") {
-      facitText = "Se billedet på skærmene og løs opgaven.";
+      facitText = "Eleverne kigger på billedet og løser opgaven.";
     }
   }
 
@@ -593,6 +586,26 @@ function renderMiniGameArea() {
     miniGameArea.appendChild(wrap);
     return;
   }
+
+  // ---------- BILLEDEQUIZ (kun for overblik) ----------
+  if (currentChallenge.type === "BilledeQuiz") {
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #cc0; border-radius:10px;";
+
+    wrap.innerHTML = `
+      <h3>BilledeQuiz</h3>
+      <p>${currentChallenge.text || ""}</p>
+      ${
+        currentChallenge.imageUrl
+          ? `<img src="${currentChallenge.imageUrl}" style="max-width:260px; border-radius:10px; margin-top:8px;" />`
+          : ""
+      }
+    `;
+
+    miniGameArea.appendChild(wrap);
+    return;
+  }
 }
 
 // =====================================================
@@ -634,7 +647,7 @@ function startVotingPhase() {
   const votingCards = shuffle(
     currentChallenge.cards.map((c) => ({
       text: c.text,
-      ownerTeamName: c.teamName || c.team
+      ownerTeamName: c.teamName || c.team,
     }))
   );
 
@@ -675,7 +688,12 @@ function finishVotingAndAward() {
 
   winners.forEach((name) => {
     const t = teams.find((x) => x.name === name);
-    if (t) t.points = (t.points ?? 0) + 1;
+    if (t) {
+      const before = t.points ?? 0;
+      t.points = before + 1;
+      const delta = t.points - before;
+      socket.emit("points-toast", { teamName: t.name, delta });
+    }
   });
 
   ch.phase = "ended";
@@ -726,7 +744,7 @@ function startKreaVotingPhase() {
   const votingPhotos = shuffle(
     currentChallenge.photos.map((p) => ({
       filename: p.filename,
-      ownerTeamName: p.teamName || p.team
+      ownerTeamName: p.teamName || p.team,
     }))
   );
 
@@ -759,7 +777,12 @@ function finishKreaVotingAndAward() {
 
   winners.forEach((name) => {
     const t = teams.find((x) => x.name === name);
-    if (t) t.points = (t.points ?? 0) + 1;
+    if (t) {
+      const before = t.points ?? 0;
+      t.points = before + 1;
+      const delta = t.points - before;
+      socket.emit("points-toast", { teamName: t.name, delta });
+    }
   });
 
   ch.phase = "ended";
@@ -817,7 +840,7 @@ yesBtn.onclick = () => {
   if (t) {
     const before = t.points ?? 0;
     t.points = before + 1;
-    const delta = t.points - before; // +1
+    const delta = t.points - before;
     socket.emit("points-toast", { teamName: t.name, delta });
   }
 
@@ -835,12 +858,12 @@ yesBtn.onclick = () => {
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  // Grandprix NO resumes listening for everyone
   if (currentChallenge.type === "Nisse Grandprix") {
     if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
       const buzzingTeam = currentChallenge.firstBuzz.teamName;
 
-      currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
+      currentChallenge.answeredTeams =
+        currentChallenge.answeredTeams || {};
       currentChallenge.answeredTeams[buzzingTeam] = true;
 
       currentChallenge.phase = "listening";
@@ -859,7 +882,6 @@ noBtn.onclick = () => {
     }
   }
 
-  // Other challenges: just end without point
   currentChallenge = null;
 
   renderCurrentChallenge();
@@ -1034,7 +1056,7 @@ socket.on("newPhoto", ({ teamName, filename }) => {
   syncToServer();
 });
 
-// ---- Votes update (used by both JuleKortet + KreaNissen)
+// ---- Votes update (JuleKortet + KreaNissen)
 socket.on("voteUpdate", ({ voter, index }) => {
   if (!currentChallenge) return;
 
@@ -1053,7 +1075,7 @@ socket.on("voteUpdate", ({ voter, index }) => {
   syncToServer();
 });
 
-// ---- Points toast from server (main also shows it) ----
+// ---- Points toast fra server (main viser den også) ----
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
 });
