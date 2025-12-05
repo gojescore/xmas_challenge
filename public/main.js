@@ -141,8 +141,7 @@ async function loadDeckSafely() {
   let ng = [];
   let jk = [];
   let kn = [];
-  let bq = []; // 👈 nyt billede-quiz deck
-
+  let bq = []; // 👈 billede-quiz deck
 
   try {
     const m = await import("./data/deck/grandprix.js?v=" + Date.now());
@@ -165,15 +164,13 @@ async function loadDeckSafely() {
     kn = m.DECK || m.kreaNissenDeck || m.deck || [];
   } catch {}
 
-    // ✅ BilledeQuiz deck (public/data/deck/billedequiz.js exporting billedeQuizDeck)
+  // ✅ BilledeQuiz deck (public/data/deck/billedequiz.js exporting billedeQuizDeck)
   try {
     const m = await import("./data/deck/billedequiz.js?v=" + Date.now());
     bq = m.DECK || m.billedeQuizDeck || m.deck || [];
   } catch {}
 
-
-   deck = [...gp, ...ng, ...jk, ...kn, ...bq].map(c => ({ ...c, used: !!c.used }));
-
+  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({ ...c, used: !!c.used }));
 
   renderDeck();
   renderTeams();
@@ -239,7 +236,7 @@ function renderDeck() {
           writingSeconds: 120,
           writingStartAt: Date.now(),
           cards: [], // [{ teamName, text }]
-          votingCards: [],
+          votingCards: [], // til voting-fasen
           votes: {}, // { voterTeamName: index }
           winners: []
         };
@@ -259,6 +256,7 @@ function renderDeck() {
       } else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
       } else {
+        // BilledeQuiz og evt. andre simple typer
         currentChallenge = { ...card };
       }
 
@@ -307,10 +305,9 @@ function renderTeams() {
       e.stopPropagation();
       const before = team.points ?? 0;
       team.points = Math.max(0, before - 1);
-      const delta = team.points - before; // will be 0 or -1
+      const delta = team.points - before; // 0 eller -1
 
       if (delta !== 0) {
-        // tell server so ALL clients (main + teams) show toast
         socket.emit("points-toast", {
           teamName: team.name,
           delta
@@ -386,10 +383,11 @@ function renderCurrentChallenge() {
         "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
     } else if (currentChallenge.type === "KreaNissen") {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
+    } else if (currentChallenge.type === "BilledeQuiz") {
+      facitText = "Se billedet på skærmene og løs opgaven.";
     }
   }
 
-  // Write FACIT line
   if (facitLine) {
     facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
   }
@@ -1089,4 +1087,3 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
