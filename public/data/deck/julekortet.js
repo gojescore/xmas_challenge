@@ -41,7 +41,36 @@ export const juleKortetDeck = [
     text: "Skriv den varmeste julehilsen til alle på skolen.",
     answer: "Eleverne stemmer",
   },
+          {
+    id: "j7",
+    type: "JuleKortet",
+    title: "LærerKortet - Julestok",
+    text: "Hvad sagde nissemor, da hun ikke ville have julemandens slikstok?",
+    answer: "Lærerne stemmer",
+  },
+          {
+    id: "j8",
+    type: "JuleKortet",
+    title: "LærerKortet - Bliv",
+    text: "Julemanden ville gerne blive længere, hvis..",
+    answer: "Lærerne stemmer",
+  },
+           {
+    id: "j9",
+    type: "JuleKortet",
+    title: "LærerKortet - Lang nat",
+    text: "Efter en lang nat hviskede julemanden..",
+    answer: "Lærerne stemmer",
+  },
+             {
+    id: "j10",
+    type: "JuleKortet",
+    title: "LærerKortet -Frosty",
+    text: "Frosty smeltede lidt, da..",
+    answer: "Lærerne stemmer",
+  }
 ];
+
 
 
 
