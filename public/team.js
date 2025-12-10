@@ -1,7 +1,6 @@
 // public/team.js v41
-// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen/BilledeQuiz)
+// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen/BilledeQuiz + Xmas winner overlay)
 
-// Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
@@ -49,7 +48,7 @@ let gpSentThisRound = false;
 // NisseGåden: remember if we already answered this riddle round
 let ngAnsweredRoundId = null;
 
-// ---------- SCORE TOAST (all teams see point changes) ----------
+// ---------- SCORE TOAST ----------
 let scoreToastEl = null;
 let scoreToastTimeout = null;
 
@@ -89,7 +88,7 @@ function showScoreToast(teamName, delta) {
   }, 4000);
 }
 
-// ---------- WINNER OVERLAY (shown when game ends) ----------
+// ---------- Xmas Winner Overlay ----------
 let winnerOverlayEl = null;
 
 function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
@@ -126,7 +125,6 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
         position: relative;
         overflow: hidden;
       ">
-        <!-- subtle decorative overlay -->
         <div style="
           position:absolute;
           inset:-40px;
@@ -146,7 +144,7 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
         <div style="position:relative; z-index:1;">
           <div style="font-size:3.2rem; margin-bottom:0.3rem;">🎄🎉</div>
           <h1 style="
-            font-size:2.3rem;
+            font-size:2.1rem;
             margin:0 0 0.8rem;
             letter-spacing:0.06em;
             text-transform:uppercase;
@@ -156,12 +154,12 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
           </h1>
 
           <p id="winnerOverlayMessage" style="
-            font-size:1.35rem;
+            font-size:1.3rem;
             margin:0 0 0.6rem;
           "></p>
 
           <p id="winnerOverlayNames" style="
-            font-size:2rem;
+            font-size:1.9rem;
             font-weight:900;
             margin:0 0 0.3rem;
           "></p>
@@ -210,26 +208,6 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   winnerOverlayEl.style.display = "flex";
 }
 
-
-  const msgEl = document.getElementById("winnerOverlayMessage");
-  const namesEl = document.getElementById("winnerOverlayNames");
-
-  if (msgEl) {
-    msgEl.textContent =
-      message ||
-      (winners && winners.length
-        ? `Vinderen er: ${winners.join(", ")} med ${topScore} point!`
-        : "Spillet er slut!");
-  }
-
-  if (namesEl) {
-    namesEl.textContent =
-      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
-  }
-
-  winnerOverlayEl.style.display = "flex";
-}
-
 // ---------- Mini-game API ----------
 const api = {
   setBuzzEnabled(enabled) {
@@ -243,7 +221,7 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
-    stopBilledeQuiz(api); // hide billedequiz if active
+    stopBilledeQuiz(api);
   }
 };
 
@@ -377,10 +355,8 @@ function ensureNisseGaadenAnswer() {
 
     socket.emit("submitCard", { teamName: myTeamName, text });
 
-    // mark this round as answered
     ngAnsweredRoundId = window.__currentRoundId || null;
 
-    // clear + lock UI
     ngInput.value = "";
     api.showStatus("✅ Svar sendt til læreren.");
     hideNisseGaadenAnswer();
@@ -467,7 +443,6 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
-  // new round => reset lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -517,7 +492,6 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
-  // Stop all mini-games before switch
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
@@ -586,7 +560,6 @@ socket.on("state", (s) => {
 
   const ch = s.currentChallenge;
 
-  // ---------- Grandprix lock-out for teams that already answered wrong ----------
   if (ch && ch.type === "Nisse Grandprix") {
     const answeredTeams = ch.answeredTeams || {};
     const normalizeName = (x) => (x || "").trim().toLowerCase();
@@ -596,7 +569,6 @@ socket.on("state", (s) => {
       (name) => normalizeName(name) === me
     );
 
-    // If this team already tried this round, BUZZ must stay disabled
     if (alreadyAnswered) {
       api.setBuzzEnabled(false);
     }
@@ -631,13 +603,12 @@ socket.on("state", (s) => {
   }
 });
 
-// When points change, show a toast on all teams
-socket.on("points-toast", ({ teamName, delta }) => {
-  showScoreToast(teamName, delta);
-});
-
-// NEW: Winner overlay on team clients
+// Winner overlay from server
 socket.on("show-winner", (payload) => {
   showWinnerOverlay(payload || {});
 });
 
+// When points change, show a toast on all teams
+socket.on("points-toast", ({ teamName, delta }) => {
+  showScoreToast(teamName, delta);
+});
