@@ -97,23 +97,89 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
     winnerOverlayEl.style.cssText = `
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.85);
+      background:
+        radial-gradient(circle at top, #ffffff22 0, transparent 55%),
+        linear-gradient(135deg, #021526 0%, #200222 50%, #05301c 100%);
       color: #fff;
       display: flex;
-      flex-direction: column;
       justify-content: center;
       align-items: center;
       z-index: 9999;
       text-align: center;
       padding: 20px;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      cursor: pointer;
     `;
 
     winnerOverlayEl.innerHTML = `
-      <h1 style="font-size:3rem; margin-bottom:1rem;">🎉 Vinder af Xmas Challenge 🎉</h1>
-      <p id="winnerOverlayMessage" style="font-size:1.6rem; margin-bottom:1rem;"></p>
-      <p id="winnerOverlayNames" style="font-size:2.2rem; font-weight:900; margin-bottom:1.5rem;"></p>
-      <p style="font-size:1rem; opacity:0.8;">Klik hvor som helst for at lukke</p>
+      <div style="
+        max-width: 720px;
+        width: min(720px, 96vw);
+        background: rgba(15, 15, 30, 0.8);
+        border-radius: 24px;
+        padding: 26px 22px 30px;
+        box-shadow: 0 16px 45px rgba(0,0,0,0.7);
+        border: 3px solid rgba(255,255,255,0.55);
+        backdrop-filter: blur(10px);
+        position: relative;
+        overflow: hidden;
+      ">
+        <!-- subtle decorative overlay -->
+        <div style="
+          position:absolute;
+          inset:-40px;
+          background-image:
+            radial-gradient(circle at 10% 0%, #ffffff33 0, transparent 55%),
+            radial-gradient(circle at 90% 100%, #ffd96633 0, transparent 55%),
+            repeating-linear-gradient(45deg,
+              rgba(255,255,255,0.15),
+              rgba(255,255,255,0.15) 2px,
+              transparent 2px,
+              transparent 6px
+            );
+          opacity:0.2;
+          pointer-events:none;
+        "></div>
+
+        <div style="position:relative; z-index:1;">
+          <div style="font-size:3.2rem; margin-bottom:0.3rem;">🎄🎉</div>
+          <h1 style="
+            font-size:2.3rem;
+            margin:0 0 0.8rem;
+            letter-spacing:0.06em;
+            text-transform:uppercase;
+            text-shadow:0 3px 10px rgba(0,0,0,0.7);
+          ">
+            Vinder af Xmas Challenge
+          </h1>
+
+          <p id="winnerOverlayMessage" style="
+            font-size:1.35rem;
+            margin:0 0 0.6rem;
+          "></p>
+
+          <p id="winnerOverlayNames" style="
+            font-size:2rem;
+            font-weight:900;
+            margin:0 0 0.3rem;
+          "></p>
+
+          <p style="
+            font-size:1.1rem;
+            margin:0 0 0.8rem;
+          ">
+            Score: <span id="winnerOverlayScore"></span> point
+          </p>
+
+          <p style="
+            font-size:0.95rem;
+            opacity:0.85;
+            margin-top:0.8rem;
+          ">
+            Klik hvor som helst på skærmen for at lukke
+          </p>
+        </div>
+      </div>
     `;
 
     winnerOverlayEl.addEventListener("click", () => {
@@ -123,17 +189,25 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
     document.body.appendChild(winnerOverlayEl);
   }
 
-  const msgEl = document.getElementById("winnerOverlayMessage");
-  const namesEl = document.getElementById("winnerOverlayNames");
+  const msgEl = winnerOverlayEl.querySelector("#winnerOverlayMessage");
+  const namesEl = winnerOverlayEl.querySelector("#winnerOverlayNames");
+  const scoreEl = winnerOverlayEl.querySelector("#winnerOverlayScore");
 
   if (msgEl) msgEl.textContent = message || "";
   if (namesEl) {
     namesEl.textContent =
       winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
   }
+  if (scoreEl) {
+    scoreEl.textContent =
+      typeof topScore === "number" && !Number.isNaN(topScore)
+        ? String(topScore)
+        : "0";
+  }
 
   winnerOverlayEl.style.display = "flex";
 }
+
 
 // =====================================================
 // Persistence
@@ -1175,3 +1249,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
