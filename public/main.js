@@ -60,7 +60,7 @@ function showScoreToast(teamName, delta) {
 // =====================================================
 let winnerOverlayEl = null;
 
-function showWinnerOverlay({ winners, topScore, message }) {
+function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   if (!winnerOverlayEl) {
     winnerOverlayEl = document.createElement("div");
     winnerOverlayEl.id = "winnerOverlay";
@@ -97,12 +97,14 @@ function showWinnerOverlay({ winners, topScore, message }) {
   const namesEl = document.getElementById("winnerOverlayNames");
 
   if (msgEl) msgEl.textContent = message || "";
-  if (namesEl) namesEl.textContent = (winners && winners.length)
-    ? winners.join(", ")
-    : "Ingen vinder fundet";
+  if (namesEl) {
+    namesEl.textContent =
+      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
+  }
 
   winnerOverlayEl.style.display = "flex";
 }
+
 
   const abs = Math.abs(delta);
   const pointWord = abs === 1 ? "point" : "point";
@@ -1170,4 +1172,5 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
 
