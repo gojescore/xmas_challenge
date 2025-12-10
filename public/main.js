@@ -55,6 +55,54 @@ function showScoreToast(teamName, delta) {
     scoreToastEl.className = "score-toast";
     document.body.appendChild(scoreToastEl);
   }
+// =====================================================
+// Winner overlay (shown on main + teams)
+// =====================================================
+let winnerOverlayEl = null;
+
+function showWinnerOverlay({ winners, topScore, message }) {
+  if (!winnerOverlayEl) {
+    winnerOverlayEl = document.createElement("div");
+    winnerOverlayEl.id = "winnerOverlay";
+    winnerOverlayEl.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      text-align: center;
+      padding: 20px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    `;
+
+    winnerOverlayEl.innerHTML = `
+      <h1 style="font-size:3rem; margin-bottom:1rem;">🎉 Vinder af Xmas Challenge 🎉</h1>
+      <p id="winnerOverlayMessage" style="font-size:1.6rem; margin-bottom:1rem;"></p>
+      <p id="winnerOverlayNames" style="font-size:2.2rem; font-weight:900; margin-bottom:1.5rem;"></p>
+      <p style="font-size:1rem; opacity:0.8;">Klik hvor som helst for at lukke</p>
+    `;
+
+    winnerOverlayEl.addEventListener("click", () => {
+      winnerOverlayEl.style.display = "none";
+    });
+
+    document.body.appendChild(winnerOverlayEl);
+  }
+
+  const msgEl = document.getElementById("winnerOverlayMessage");
+  const namesEl = document.getElementById("winnerOverlayNames");
+
+  if (msgEl) msgEl.textContent = message || "";
+  if (namesEl) namesEl.textContent = (winners && winners.length)
+    ? winners.join(", ")
+    : "Ingen vinder fundet";
+
+  winnerOverlayEl.style.display = "flex";
+}
 
   const abs = Math.abs(delta);
   const pointWord = abs === 1 ? "point" : "point";
@@ -920,14 +968,31 @@ endGameBtn.onclick = () => {
   const topScore = sorted[0].points;
   const winners = sorted.filter((t) => t.points === topScore);
 
-  endGameResultEl.textContent =
+  const message =
     winners.length === 1
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
       : `Uafgjort: ${winners.map((x) => x.name).join(", ")} – ${topScore} point.`;
 
+  endGameResultEl.textContent = message;
+
+  // 👇 NEW: show winner overlay locally
+  showWinnerOverlay({
+    winners: winners.map((w) => w.name),
+    topScore,
+    message
+  });
+
+  // 👇 NEW: tell server so ALL screens show the winner overlay
+  socket.emit("show-winner", {
+    winners: winners.map((w) => w.name),
+    topScore,
+    message
+  });
+
   saveLocal();
   syncToServer();
 };
+
 
 // =====================================================
 // Start game
@@ -986,6 +1051,11 @@ socket.on("buzzed", (teamName) => {
   renderMiniGameArea();
   saveLocal();
   syncToServer();
+});
+
+// ---- Winner overlay from server ----
+socket.on("show-winner", (payload) => {
+  showWinnerOverlay(payload || {});
 });
 
 // ---- Grandprix typed answer ----
@@ -1100,3 +1170,4 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
