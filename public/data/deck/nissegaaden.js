@@ -84,7 +84,7 @@ export const nisseGaaden = [
     type: "NisseGåden",
     title: "NC - Nisseudfordring1",
     text: "Vælg en deltager, skriv hvem her, og send personen ned til kontoret. Vinderen af udfordringen får point.",
-    answer: "4",
+    answer: "Sneboldkast",
     used: false
   },
             {
@@ -92,11 +92,12 @@ export const nisseGaaden = [
     type: "NisseGåden",
     title: "NC - Nisseudfordring2",
     text: "Vælg en deltager, skriv hvem her, og send personen ned til kontoret. Vinderen af udfordringen får point.",
-    answer: "4",
+    answer: "Find flest nisser",
     used: false
   }
 
 ];
+
 
 
 
