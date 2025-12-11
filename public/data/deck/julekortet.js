@@ -82,8 +82,16 @@ export const juleKortetDeck = [
     title: "LærerKortet - Hemmelige ønske",
     text: "Grunden til at ingen nisser vil arbejde om natten i rensdyrstalden!",
     answer: "Lærerne stemmer",
+  },
+                 {
+    id: "j13",
+    type: "JuleKortet",
+    title: "LærerKortet - Midt i skorstenen",
+    text: "Julemanden stoppede halvvejs nede i skorstenen fordi han så..",
+    answer: "Lærerne stemmer",
   }
 ];
+
 
 
 
