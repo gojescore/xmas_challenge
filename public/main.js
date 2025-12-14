@@ -1250,3 +1250,162 @@ renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
 
+// =====================================================
+// VOICE MESSAGE FEATURE (NEW – SAFE ADDITION)
+// =====================================================
+(function initVoicePanel() {
+  // UI
+  const panel = document.createElement("div");
+  panel.id = "voicePanel";
+  panel.style.cssText = `
+    position:fixed; right:14px; bottom:14px; z-index:9999;
+    width:min(380px, 92vw);
+    background:rgba(255,255,255,0.92);
+    border:2px solid rgba(0,0,0,0.15);
+    border-radius:14px;
+    padding:12px;
+    box-shadow:0 8px 26px rgba(0,0,0,0.25);
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  `;
+
+  panel.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <div style="font-weight:900;">🎙️ Voice besked</div>
+      <button id="vpClose" style="border:none; background:transparent; font-size:18px; cursor:pointer;">✕</button>
+    </div>
+
+    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="vpRecord" class="challenge-card" style="padding:8px 10px;">Optag</button>
+      <button id="vpStop" class="challenge-card" style="padding:8px 10px;" disabled>Stop</button>
+      <button id="vpSend" class="challenge-card" style="padding:8px 10px;" disabled>Send til alle</button>
+    </div>
+
+    <div id="vpStatus" style="margin-top:8px; font-weight:800; font-size:0.95rem;"></div>
+    <audio id="vpPreview" controls style="margin-top:10px; width:100%; display:none;"></audio>
+  `;
+
+  document.body.appendChild(panel);
+
+  const closeBtn = panel.querySelector("#vpClose");
+  const recordBtn = panel.querySelector("#vpRecord");
+  const stopBtn = panel.querySelector("#vpStop");
+  const sendBtn = panel.querySelector("#vpSend");
+  const statusEl = panel.querySelector("#vpStatus");
+  const previewEl = panel.querySelector("#vpPreview");
+
+  closeBtn.onclick = () => (panel.style.display = "none");
+
+  let mediaRecorder = null;
+  let audioStream = null;
+  let chunks = [];
+  let recordedBlob = null;
+  let recordedMime = "";
+
+  function setStatus(t) {
+    statusEl.textContent = t || "";
+  }
+
+  function stopStream() {
+    if (audioStream) {
+      audioStream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+      audioStream = null;
+    }
+  }
+
+  recordBtn.onclick = async () => {
+    recordedBlob = null;
+    chunks = [];
+    previewEl.style.display = "none";
+    previewEl.src = "";
+    sendBtn.disabled = true;
+
+    try {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = {};
+
+      // Prefer webm/opus if supported
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+        options.mimeType = "audio/webm;codecs=opus";
+      } else if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm")) {
+        options.mimeType = "audio/webm";
+      }
+
+      mediaRecorder = new MediaRecorder(audioStream, options);
+      recordedMime = mediaRecorder.mimeType || options.mimeType || "";
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        recordedBlob = new Blob(chunks, { type: recordedMime || "audio/webm" });
+        const url = URL.createObjectURL(recordedBlob);
+        previewEl.src = url;
+        previewEl.style.display = "block";
+        sendBtn.disabled = false;
+        setStatus("✅ Optagelse klar. Tryk Send til alle.");
+        stopStream();
+      };
+
+      mediaRecorder.start();
+      recordBtn.disabled = true;
+      stopBtn.disabled = false;
+      setStatus("⏺️ Optager… tryk Stop når du er færdig.");
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Kunne ikke starte mikrofon (tilladelse?).");
+      recordBtn.disabled = false;
+      stopBtn.disabled = true;
+      stopStream();
+    }
+  };
+
+  stopBtn.onclick = () => {
+    if (!mediaRecorder) return;
+    try {
+      mediaRecorder.stop();
+    } catch {}
+    stopBtn.disabled = true;
+    recordBtn.disabled = false;
+    setStatus("⏳ Stopper optagelse…");
+  };
+
+  sendBtn.onclick = async () => {
+    if (!recordedBlob) return;
+
+    sendBtn.disabled = true;
+    recordBtn.disabled = true;
+    stopBtn.disabled = true;
+    setStatus("⏳ Sender lyd til server…");
+
+    try {
+      const fd = new FormData();
+      // filename extension is not critical; server uses generated name
+      fd.append("file", recordedBlob, "voice.webm");
+
+      const res = await fetch("/upload-audio", { method: "POST", body: fd });
+      if (!res.ok) throw new Error("upload failed");
+
+      const json = await res.json();
+      if (!json?.filename) throw new Error("no filename");
+
+      // Broadcast to all clients
+      socket.emit("send-voice", {
+        filename: json.filename,
+        from: "Lærer",
+        createdAt: Date.now(),
+        mimeType: recordedMime || "audio/webm"
+      });
+
+      setStatus("✅ Voice besked sendt til alle skærme.");
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Upload fejlede. Prøv igen.");
+      sendBtn.disabled = false;
+    } finally {
+      recordBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  };
+})();
+
