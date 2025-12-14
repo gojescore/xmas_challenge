@@ -612,3 +612,86 @@ socket.on("points-toast", ({ teamName, delta }) => {
 socket.on("show-winner", (payload) => {
   showWinnerOverlay(payload || {});
 });
+
+// =====================================================
+// VOICE MESSAGE FEATURE (NEW – SAFE ADDITION)
+// =====================================================
+let voiceOverlayEl = null;
+
+function showVoiceOverlay({ filename, from, createdAt } = {}) {
+  if (!filename) return;
+
+  if (!voiceOverlayEl) {
+    voiceOverlayEl = document.createElement("div");
+    voiceOverlayEl.id = "voiceOverlay";
+    voiceOverlayEl.style.cssText = `
+      position:fixed; inset:0; z-index:9999;
+      background: rgba(0,0,0,0.80);
+      display:flex; justify-content:center; align-items:center;
+      padding:16px;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    `;
+
+    voiceOverlayEl.innerHTML = `
+      <div style="
+        width:min(720px, 96vw);
+        background: rgba(255,255,255,0.95);
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        text-align:center;
+      ">
+        <h2 style="margin:0 0 10px; font-size:2rem;">🎙️ Besked fra læreren</h2>
+        <div id="voMeta" style="font-weight:800; margin-bottom:12px;"></div>
+
+        <audio id="voAudio" controls style="width:100%;"></audio>
+
+        <div style="margin-top:12px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+          <button id="voPlay" style="
+            font-size:1.2rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
+          ">▶ Afspil</button>
+
+          <button id="voClose" style="
+            font-size:1.2rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#444; color:#fff; cursor:pointer;
+          ">Luk</button>
+        </div>
+
+        <div style="margin-top:10px; font-size:0.95rem; opacity:0.75;">
+          Hvis afspilning ikke starter automatisk, tryk “Afspil”.
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(voiceOverlayEl);
+
+    voiceOverlayEl.querySelector("#voClose").onclick = () => {
+      voiceOverlayEl.style.display = "none";
+      const a = voiceOverlayEl.querySelector("#voAudio");
+      try { a.pause(); } catch {}
+    };
+
+    voiceOverlayEl.querySelector("#voPlay").onclick = async () => {
+      const a = voiceOverlayEl.querySelector("#voAudio");
+      try { await a.play(); } catch {}
+    };
+  }
+
+  const meta = voiceOverlayEl.querySelector("#voMeta");
+  const audio = voiceOverlayEl.querySelector("#voAudio");
+
+  const timeText = createdAt ? new Date(createdAt).toLocaleTimeString() : "";
+  meta.textContent = `${from || "Lærer"} ${timeText ? "· " + timeText : ""}`;
+
+  // cache-bust so it loads immediately
+  audio.src = `/uploads_audio/${filename}?v=${Date.now()}`;
+  audio.load();
+
+  voiceOverlayEl.style.display = "flex";
+}
+
+// Listen for voice messages
+socket.on("voice-message", (payload) => {
+  showVoiceOverlay(payload || {});
+});
