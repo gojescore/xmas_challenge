@@ -1,5 +1,5 @@
 // server.js
-// Xmas Challenge – main + team + minigames + point toasts + winner overlay
+// Xmas Challenge – main + team + minigames + point toasts + winner + voice messages
 
 const express = require("express");
 const http = require("http");
@@ -16,49 +16,38 @@ const io = new Server(server);
 // STATIC FILES
 // -----------------------------------------------------
 const PUBLIC_DIR = path.join(__dirname, "public");
-const UPLOAD_DIR = path.join(__dirname, "uploads");
+const UPLOAD_DIR = path.join(__dirname, "uploads"); // KreaNissen photos
+const AUDIO_DIR = path.join(__dirname, "uploads-audio"); // voice messages
+
+// Ensure upload folders exist
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
+
+app.use(express.static(PUBLIC_DIR));
+app.use("/uploads", express.static(UPLOAD_DIR));
+app.use("/uploads-audio", express.static(AUDIO_DIR));
 
 // -----------------------------------------------------
-// VOICE MESSAGES (UPLOAD + STATIC)
+// FILE UPLOAD (KreaNissen photos)
 // -----------------------------------------------------
-const AUDIO_DIR = path.join(__dirname, "uploads_audio");
+const uploadPhoto = multer({ dest: UPLOAD_DIR });
 
-// Ensure uploads_audio folder exists
-if (!fs.existsSync(AUDIO_DIR)) {
-  fs.mkdirSync(AUDIO_DIR, { recursive: true });
-}
+app.post("/upload", uploadPhoto.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, message: "Ingen fil modtaget." });
+  }
+  res.json({ ok: true, filename: req.file.filename });
+});
 
-app.use("/uploads_audio", express.static(AUDIO_DIR));
-
-// Multer for audio uploads
+// -----------------------------------------------------
+// FILE UPLOAD (Voice messages)
+// -----------------------------------------------------
 const uploadAudio = multer({ dest: AUDIO_DIR });
 
 app.post("/upload-audio", uploadAudio.single("file"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ ok: false, message: "Ingen lydfil modtaget." });
   }
-  res.json({ ok: true, filename: req.file.filename });
-});
-
-
-// Ensure uploads folder exists (for KreaNissen photos)
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
-
-app.use(express.static(PUBLIC_DIR));
-app.use("/uploads", express.static(UPLOAD_DIR));
-
-// -----------------------------------------------------
-// FILE UPLOAD (KreaNissen)
-// -----------------------------------------------------
-const upload = multer({ dest: UPLOAD_DIR });
-
-app.post("/upload", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ ok: false, message: "Ingen fil modtaget." });
-  }
-  // Client only needs filename, image is served from /uploads/<filename>
   res.json({ ok: true, filename: req.file.filename });
 });
 
@@ -69,8 +58,18 @@ let state = {
   teams: [],
   deck: [],
   currentChallenge: null,
-  gameCode: null
+  gameCode: null,
 };
+
+// Helper to compare old/new team points
+function indexTeamsByKey(teams) {
+  const map = new Map();
+  for (const t of teams || []) {
+    const key = (t.id || t.name || "").toLowerCase();
+    if (key) map.set(key, t);
+  }
+  return map;
+}
 
 // -----------------------------------------------------
 // SOCKET.IO
@@ -80,15 +79,6 @@ io.on("connection", (socket) => {
 
   // Send current state to new client (main or team)
   socket.emit("state", state);
-
-  // ---------------------------------------------
-// Winner/Voice screens (admin -> all clients)
-// ---------------------------------------------
-socket.on("send-voice", (payload) => {
-  // payload: { filename, from, createdAt, mimeType }
-  io.emit("voice-message", payload);
-});
-
 
   // ---------------------------------------------
   // TEAMS: joinGame (code + team name)
@@ -106,7 +96,6 @@ socket.on("send-voice", (payload) => {
         return;
       }
 
-      // Either reuse existing team or create new one
       let team = state.teams.find(
         (t) => (t.name || "").toLowerCase() === trimmedName.toLowerCase()
       );
@@ -115,15 +104,13 @@ socket.on("send-voice", (payload) => {
         team = {
           id: "t" + Date.now() + Math.random(),
           name: trimmedName,
-          points: 0
+          points: 0,
         };
         state.teams.push(team);
         io.emit("state", state);
       }
 
-      // Remember which team this socket belongs to (for buzz etc.)
       socket.data.teamName = team.name;
-
       cb && cb({ ok: true, team });
     } catch (err) {
       console.error("joinGame error:", err);
@@ -137,16 +124,32 @@ socket.on("send-voice", (payload) => {
   socket.on("updateState", (newState) => {
     if (!newState) return;
 
-    const newTeams = Array.isArray(newState.teams)
-      ? newState.teams
-      : state.teams;
+    // 1) Compute point changes for toasts
+    const oldIndex = indexTeamsByKey(state.teams);
+    const newTeams = Array.isArray(newState.teams) ? newState.teams : state.teams;
 
+    for (const t of newTeams) {
+      const key = (t.id || t.name || "").toLowerCase();
+      if (!key) continue;
+
+      const old = oldIndex.get(key);
+      const oldPts = old?.points ?? 0;
+      const newPts = t.points ?? 0;
+      const delta = newPts - oldPts;
+
+      if (delta !== 0) {
+        io.emit("points-toast", { teamName: t.name, delta });
+      }
+    }
+
+    // 2) Replace state with new one
     state = {
       ...state,
       ...newState,
-      teams: newTeams
+      teams: newTeams,
     };
 
+    // 3) Broadcast new full state
     io.emit("state", state);
   });
 
@@ -154,8 +157,16 @@ socket.on("send-voice", (payload) => {
   // Winner screen (admin -> all clients)
   // ---------------------------------------------
   socket.on("show-winner", (payload) => {
-    // payload: { winners: [names], topScore, message }
     io.emit("show-winner", payload);
+  });
+
+  // ---------------------------------------------
+  // Voice message (admin -> all clients)
+  // ---------------------------------------------
+  socket.on("send-voice", (payload) => {
+    // payload: { filename, from, createdAt, mimeType }
+    if (!payload || !payload.filename) return;
+    io.emit("send-voice", payload);
   });
 
   // ---------------------------------------------
@@ -164,7 +175,6 @@ socket.on("send-voice", (payload) => {
   socket.on("buzz", () => {
     const teamName = socket.data.teamName;
     if (!teamName) return;
-
     io.emit("buzzed", teamName);
   });
 
@@ -177,10 +187,6 @@ socket.on("send-voice", (payload) => {
 
   // ---------------------------------------------
   // NISSEGÅDEN / JULEKORTET: submit text card
-  //  - Accepts BOTH:
-  //      { teamName, text }
-  //    and
-  //      "bare selve teksten"
   // ---------------------------------------------
   socket.on("submitCard", (payload) => {
     let teamName = null;
@@ -199,8 +205,6 @@ socket.on("send-voice", (payload) => {
 
   // ---------------------------------------------
   // KREANISSEN: new uploaded photo
-  //  - Clients emit: socket.emit("submitPhoto", { teamName, filename })
-  //  - Admin/main listens on "newPhoto"
   // ---------------------------------------------
   socket.on("submitPhoto", ({ teamName, filename }) => {
     if (!filename) return;
@@ -208,32 +212,19 @@ socket.on("send-voice", (payload) => {
     io.emit("newPhoto", { teamName: realTeamName, filename });
   });
 
-  // (Optional backwards compatibility if anyone still uses "newPhoto" directly)
-  socket.on("newPhoto", (payload) => {
-    io.emit("newPhoto", payload);
-  });
+  // Backwards compatibility
+  socket.on("newPhoto", (payload) => io.emit("newPhoto", payload));
 
   // ---------------------------------------------
-  // Voting (JuleKortet + KreaNissen)
-  //  - Clients emit: socket.emit("vote", index)
-  //  - Admin/main expects "voteUpdate" with { voter, index }
+  // Voting
   // ---------------------------------------------
   socket.on("vote", (index) => {
     const voter = socket.data.teamName || "Ukendt hold";
     io.emit("voteUpdate", { voter, index });
   });
 
-  // (Backwards compatibility if someone sends voteUpdate directly)
-  socket.on("voteUpdate", (payload) => {
-    io.emit("voteUpdate", payload);
-  });
-
-  // ---------------------------------------------
-  // Point toasts – relay from admin to everyone
-  // ---------------------------------------------
-  socket.on("points-toast", (payload) => {
-    io.emit("points-toast", payload);
-  });
+  // Backwards compatibility
+  socket.on("voteUpdate", (payload) => io.emit("voteUpdate", payload));
 
   // ---------------------------------------------
   // Grandprix: stop audio everywhere
@@ -254,5 +245,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
-
-
