@@ -1,5 +1,5 @@
-// public/main.js v38
-// Facit line + reload deck + score toast + winner overlay + all minigames
+// public/main.js v39
+// Facit line + reload deck + score toast + winner overlay + all minigames + VOICE panel (admin)
 
 // =====================================================
 // SOCKET
@@ -41,7 +41,7 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v38";
+const STORAGE_KEY = "xmasChallenge_admin_v39";
 
 // =====================================================
 // SCORE TOAST (same event as team.js)
@@ -65,12 +65,8 @@ function showScoreToast(teamName, delta) {
       : `${teamName} har mistet ${abs} ${pointWord}!`;
 
   scoreToastEl.className = "score-toast";
-
-  if (delta > 0) {
-    scoreToastEl.classList.add("score-toast--gain");
-  } else {
-    scoreToastEl.classList.add("score-toast--loss");
-  }
+  if (delta > 0) scoreToastEl.classList.add("score-toast--gain");
+  else scoreToastEl.classList.add("score-toast--loss");
 
   scoreToastEl.textContent = msg;
 
@@ -124,7 +120,6 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
         position: relative;
         overflow: hidden;
       ">
-        <!-- subtle decorative overlay -->
         <div style="
           position:absolute;
           inset:-40px;
@@ -208,6 +203,200 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   winnerOverlayEl.style.display = "flex";
 }
 
+// =====================================================
+// VOICE MESSAGE FEATURE (ADMIN → ALL TEAMS)
+//  - Requires server: POST /upload-audio + socket event "send-voice"
+// =====================================================
+let __voicePanelEl = null;
+
+function initVoicePanel() {
+  if (__voicePanelEl) return;
+
+  const panel = document.createElement("div");
+  panel.id = "voicePanel";
+  panel.style.cssText = `
+    position:fixed; right:14px; bottom:14px; z-index:9999;
+    width:min(380px, 92vw);
+    background:rgba(255,255,255,0.92);
+    border:2px solid rgba(0,0,0,0.15);
+    border-radius:14px;
+    padding:12px;
+    box-shadow:0 8px 26px rgba(0,0,0,0.25);
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    display:none;
+  `;
+
+  panel.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <div style="font-weight:900;">🎙️ Voice besked</div>
+      <button id="vpClose" style="border:none; background:transparent; font-size:18px; cursor:pointer;">✕</button>
+    </div>
+
+    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="vpRecord" class="challenge-card" style="padding:8px 10px;">Optag</button>
+      <button id="vpStop" class="challenge-card" style="padding:8px 10px;" disabled>Stop</button>
+      <button id="vpSend" class="challenge-card" style="padding:8px 10px;" disabled>Send til alle</button>
+    </div>
+
+    <div id="vpStatus" style="margin-top:8px; font-weight:800; font-size:0.95rem;"></div>
+    <audio id="vpPreview" controls style="margin-top:10px; width:100%; display:none;"></audio>
+  `;
+
+  document.body.appendChild(panel);
+  __voicePanelEl = panel;
+
+  const closeBtn = panel.querySelector("#vpClose");
+  const recordBtn = panel.querySelector("#vpRecord");
+  const stopBtn = panel.querySelector("#vpStop");
+  const sendBtn = panel.querySelector("#vpSend");
+  const statusEl = panel.querySelector("#vpStatus");
+  const previewEl = panel.querySelector("#vpPreview");
+
+  function setStatus(t) {
+    if (statusEl) statusEl.textContent = t || "";
+  }
+
+  closeBtn.onclick = () => (panel.style.display = "none");
+
+  window.__showVoicePanel = () => {
+    panel.style.display = "block";
+  };
+
+  // ESC closes the panel (admin convenience)
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && panel.style.display !== "none") {
+      panel.style.display = "none";
+    }
+  });
+
+  let mediaRecorder = null;
+  let audioStream = null;
+  let chunks = [];
+  let recordedBlob = null;
+  let recordedMime = "";
+
+  function stopStream() {
+    if (audioStream) {
+      audioStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+      audioStream = null;
+    }
+  }
+
+  recordBtn.onclick = async () => {
+    recordedBlob = null;
+    chunks = [];
+    previewEl.style.display = "none";
+    previewEl.src = "";
+    sendBtn.disabled = true;
+
+    try {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = {};
+
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+        options.mimeType = "audio/webm;codecs=opus";
+      } else if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm")) {
+        options.mimeType = "audio/webm";
+      }
+
+      mediaRecorder = new MediaRecorder(audioStream, options);
+      recordedMime = mediaRecorder.mimeType || options.mimeType || "";
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        recordedBlob = new Blob(chunks, { type: recordedMime || "audio/webm" });
+        const url = URL.createObjectURL(recordedBlob);
+        previewEl.src = url;
+        previewEl.style.display = "block";
+        sendBtn.disabled = false;
+        setStatus("✅ Optagelse klar. Tryk Send til alle.");
+        stopStream();
+      };
+
+      mediaRecorder.start();
+      recordBtn.disabled = true;
+      stopBtn.disabled = false;
+      setStatus("⏺️ Optager… tryk Stop når du er færdig.");
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Kunne ikke starte mikrofon (tilladelse?).");
+      recordBtn.disabled = false;
+      stopBtn.disabled = true;
+      stopStream();
+    }
+  };
+
+  stopBtn.onclick = () => {
+    if (!mediaRecorder) return;
+    try { mediaRecorder.stop(); } catch {}
+    stopBtn.disabled = true;
+    recordBtn.disabled = false;
+    setStatus("⏳ Stopper optagelse…");
+  };
+
+  sendBtn.onclick = async () => {
+    if (!recordedBlob) return;
+
+    sendBtn.disabled = true;
+    recordBtn.disabled = true;
+    stopBtn.disabled = true;
+    setStatus("⏳ Sender lyd til server…");
+
+    try {
+      const fd = new FormData();
+      fd.append("file", recordedBlob, "voice.webm");
+
+      const res = await fetch("/upload-audio", { method: "POST", body: fd });
+      if (!res.ok) throw new Error("upload failed");
+
+      const json = await res.json();
+      if (!json?.filename) throw new Error("no filename");
+
+      socket.emit("send-voice", {
+        filename: json.filename,
+        from: "Lærer",
+        createdAt: Date.now(),
+        mimeType: recordedMime || "audio/webm"
+      });
+
+      setStatus("✅ Voice besked sendt til alle skærme.");
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Upload fejlede. Prøv igen.");
+      sendBtn.disabled = false;
+    } finally {
+      recordBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  };
+}
+
+function addVoiceOpenButtonNextToEndGame() {
+  if (!endGameBtn) return;
+
+  // Avoid duplicates
+  if (document.getElementById("openVoiceBtn")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "openVoiceBtn";
+  btn.type = "button";
+  btn.className = endGameBtn.className || "challenge-card";
+  btn.textContent = "🎙️ Voice";
+  btn.style.marginLeft = "8px";
+
+  btn.onclick = () => {
+    initVoicePanel();
+    if (window.__showVoicePanel) window.__showVoicePanel();
+  };
+
+  // Place next to endGameBtn
+  endGameBtn.insertAdjacentElement("afterend", btn);
+}
 
 // =====================================================
 // Persistence
@@ -358,9 +547,9 @@ function renderDeck() {
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [],          // [{ teamName, text }]
+          cards: [], // [{ teamName, text }]
           votingCards: [],
-          votes: {},          // { voterTeamName: index }
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminWritingTimer();
@@ -370,16 +559,15 @@ function renderDeck() {
           phase: "creating",
           creatingSeconds: 180,
           creatingStartAt: Date.now(),
-          photos: [],         // [{ teamName, filename }]
+          photos: [], // [{ teamName, filename }]
           votingPhotos: [],
-          votes: {},          // { voterTeamName: index }
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminCreatingTimer();
       } else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
       } else {
-        // BilledeQuiz + evt. andre
         currentChallenge = { ...card };
       }
 
@@ -431,10 +619,7 @@ function renderTeams() {
       const delta = team.points - before;
 
       if (delta !== 0) {
-        socket.emit("points-toast", {
-          teamName: team.name,
-          delta
-        });
+        socket.emit("points-toast", { teamName: team.name, delta });
       }
 
       saveLocal();
@@ -453,10 +638,7 @@ function renderTeams() {
       team.points = before + 1;
       const delta = team.points - before;
 
-      socket.emit("points-toast", {
-        teamName: team.name,
-        delta
-      });
+      socket.emit("points-toast", { teamName: team.name, delta });
 
       saveLocal();
       renderTeams();
@@ -524,7 +706,6 @@ function renderMiniGameArea() {
   miniGameArea.innerHTML = "";
   if (!currentChallenge) return;
 
-  // ---------- GRANDPRIX ----------
   if (currentChallenge.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
     wrap.style.cssText =
@@ -543,7 +724,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- NISSEGÅDEN ----------
   if (currentChallenge.type === "NisseGåden") {
     const wrap = document.createElement("div");
     wrap.style.cssText =
@@ -573,7 +753,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- JULEKORTET ----------
   if (currentChallenge.type === "JuleKortet") {
     const ch = currentChallenge;
 
@@ -640,7 +819,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- KREANISSEN ----------
   if (currentChallenge.type === "KreaNissen") {
     const ch = currentChallenge;
 
@@ -707,7 +885,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- BILLEDEQUIZ ----------
   if (currentChallenge.type === "BilledeQuiz") {
     const wrap = document.createElement("div");
     wrap.style.cssText =
@@ -1055,14 +1232,12 @@ endGameBtn.onclick = () => {
 
   endGameResultEl.textContent = message;
 
-  // Show winner overlay locally
   showWinnerOverlay({
     winners: winners.map((w) => w.name),
     topScore,
     message
   });
 
-  // Tell server so ALL screens show the winner overlay
   socket.emit("show-winner", {
     winners: winners.map((w) => w.name),
     topScore,
@@ -1111,8 +1286,6 @@ addTeamBtn.onclick = () => {
 // =====================================================
 // SOCKET LISTENERS
 // =====================================================
-
-// ---- Grandprix buzz ----
 socket.on("buzzed", (teamName) => {
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
   if (currentChallenge.phase !== "listening") return;
@@ -1132,12 +1305,10 @@ socket.on("buzzed", (teamName) => {
   syncToServer();
 });
 
-// ---- Winner overlay from server ----
 socket.on("show-winner", (payload) => {
   showWinnerOverlay(payload || {});
 });
 
-// ---- Grandprix typed answer ----
 socket.on("gp-typed-answer", ({ teamName, text }) => {
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
 
@@ -1152,7 +1323,6 @@ socket.on("gp-typed-answer", ({ teamName, text }) => {
   syncToServer();
 });
 
-// ---- Shared "newCard" from server (NisseGåden + JuleKortet)
 socket.on("newCard", (payload) => {
   if (!currentChallenge) return;
 
@@ -1178,7 +1348,6 @@ socket.on("newCard", (payload) => {
   syncToServer();
 });
 
-// ---- KreaNissen photo submit ----
 socket.on("newPhoto", (payload) => {
   if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
   if (currentChallenge.phase !== "creating") return;
@@ -1196,7 +1365,6 @@ socket.on("newPhoto", (payload) => {
   syncToServer();
 });
 
-// ---- Votes update (used by both JuleKortet + KreaNissen)
 socket.on("voteUpdate", ({ voter, index }) => {
   if (!currentChallenge) return;
 
@@ -1215,12 +1383,10 @@ socket.on("voteUpdate", ({ voter, index }) => {
   syncToServer();
 });
 
-// ---- Points toast from server (main also shows it) ----
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
 });
 
-// ---- Full state sync from server ----
 socket.on("state", (s) => {
   if (!s) return;
 
@@ -1247,165 +1413,12 @@ renderTeams();
 renderDeck();
 renderCurrentChallenge();
 renderMiniGameArea();
+
+// Add the Voice button next to "Afslut spil" (safe DOM addition)
+addVoiceOpenButtonNextToEndGame();
+
+// Create the panel (hidden by default; open via 🎙️ Voice button)
+initVoicePanel();
+
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
-// =====================================================
-// VOICE MESSAGE FEATURE (NEW – SAFE ADDITION)
-// =====================================================
-(function initVoicePanel() {
-  // UI
-  const panel = document.createElement("div");
-  panel.id = "voicePanel";
-  panel.style.cssText = `
-    position:fixed; right:14px; bottom:14px; z-index:9999;
-    width:min(380px, 92vw);
-    background:rgba(255,255,255,0.92);
-    border:2px solid rgba(0,0,0,0.15);
-    border-radius:14px;
-    padding:12px;
-    box-shadow:0 8px 26px rgba(0,0,0,0.25);
-    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  `;
-
-  panel.innerHTML = `
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-      <div style="font-weight:900;">🎙️ Voice besked</div>
-      <button id="vpClose" style="border:none; background:transparent; font-size:18px; cursor:pointer;">✕</button>
-    </div>
-
-    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button id="vpRecord" class="challenge-card" style="padding:8px 10px;">Optag</button>
-      <button id="vpStop" class="challenge-card" style="padding:8px 10px;" disabled>Stop</button>
-      <button id="vpSend" class="challenge-card" style="padding:8px 10px;" disabled>Send til alle</button>
-    </div>
-
-    <div id="vpStatus" style="margin-top:8px; font-weight:800; font-size:0.95rem;"></div>
-    <audio id="vpPreview" controls style="margin-top:10px; width:100%; display:none;"></audio>
-  `;
-
-  document.body.appendChild(panel);
-
-  const closeBtn = panel.querySelector("#vpClose");
-  const recordBtn = panel.querySelector("#vpRecord");
-  const stopBtn = panel.querySelector("#vpStop");
-  const sendBtn = panel.querySelector("#vpSend");
-  const statusEl = panel.querySelector("#vpStatus");
-  const previewEl = panel.querySelector("#vpPreview");
-
-  closeBtn.onclick = () => (panel.style.display = "none");
-
-  let mediaRecorder = null;
-  let audioStream = null;
-  let chunks = [];
-  let recordedBlob = null;
-  let recordedMime = "";
-
-  function setStatus(t) {
-    statusEl.textContent = t || "";
-  }
-
-  function stopStream() {
-    if (audioStream) {
-      audioStream.getTracks().forEach(t => { try { t.stop(); } catch {} });
-      audioStream = null;
-    }
-  }
-
-  recordBtn.onclick = async () => {
-    recordedBlob = null;
-    chunks = [];
-    previewEl.style.display = "none";
-    previewEl.src = "";
-    sendBtn.disabled = true;
-
-    try {
-      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const options = {};
-
-      // Prefer webm/opus if supported
-      if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-        options.mimeType = "audio/webm;codecs=opus";
-      } else if (window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm")) {
-        options.mimeType = "audio/webm";
-      }
-
-      mediaRecorder = new MediaRecorder(audioStream, options);
-      recordedMime = mediaRecorder.mimeType || options.mimeType || "";
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        recordedBlob = new Blob(chunks, { type: recordedMime || "audio/webm" });
-        const url = URL.createObjectURL(recordedBlob);
-        previewEl.src = url;
-        previewEl.style.display = "block";
-        sendBtn.disabled = false;
-        setStatus("✅ Optagelse klar. Tryk Send til alle.");
-        stopStream();
-      };
-
-      mediaRecorder.start();
-      recordBtn.disabled = true;
-      stopBtn.disabled = false;
-      setStatus("⏺️ Optager… tryk Stop når du er færdig.");
-    } catch (err) {
-      console.error(err);
-      setStatus("⚠️ Kunne ikke starte mikrofon (tilladelse?).");
-      recordBtn.disabled = false;
-      stopBtn.disabled = true;
-      stopStream();
-    }
-  };
-
-  stopBtn.onclick = () => {
-    if (!mediaRecorder) return;
-    try {
-      mediaRecorder.stop();
-    } catch {}
-    stopBtn.disabled = true;
-    recordBtn.disabled = false;
-    setStatus("⏳ Stopper optagelse…");
-  };
-
-  sendBtn.onclick = async () => {
-    if (!recordedBlob) return;
-
-    sendBtn.disabled = true;
-    recordBtn.disabled = true;
-    stopBtn.disabled = true;
-    setStatus("⏳ Sender lyd til server…");
-
-    try {
-      const fd = new FormData();
-      // filename extension is not critical; server uses generated name
-      fd.append("file", recordedBlob, "voice.webm");
-
-      const res = await fetch("/upload-audio", { method: "POST", body: fd });
-      if (!res.ok) throw new Error("upload failed");
-
-      const json = await res.json();
-      if (!json?.filename) throw new Error("no filename");
-
-      // Broadcast to all clients
-      socket.emit("send-voice", {
-        filename: json.filename,
-        from: "Lærer",
-        createdAt: Date.now(),
-        mimeType: recordedMime || "audio/webm"
-      });
-
-      setStatus("✅ Voice besked sendt til alle skærme.");
-    } catch (err) {
-      console.error(err);
-      setStatus("⚠️ Upload fejlede. Prøv igen.");
-      sendBtn.disabled = false;
-    } finally {
-      recordBtn.disabled = false;
-      stopBtn.disabled = true;
-    }
-  };
-})();
-
