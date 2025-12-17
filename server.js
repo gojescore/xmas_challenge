@@ -46,7 +46,9 @@ const uploadAudio = multer({ dest: AUDIO_DIR });
 
 app.post("/upload-audio", uploadAudio.single("file"), (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ ok: false, message: "Ingen lydfil modtaget." });
+    return res
+      .status(400)
+      .json({ ok: false, message: "Ingen lydfil modtaget." });
   }
   res.json({ ok: true, filename: req.file.filename });
 });
@@ -72,13 +74,29 @@ function indexTeamsByKey(teams) {
 }
 
 // -----------------------------------------------------
+// STATE EMIT HELPERS (adds server time to prevent clock-skew bugs)
+// -----------------------------------------------------
+function snapshotState() {
+  // Important: do NOT mutate state; just add a derived field
+  return { ...state, serverNow: Date.now() };
+}
+
+function emitStateToAll() {
+  io.emit("state", snapshotState());
+}
+
+function emitStateToSocket(socket) {
+  socket.emit("state", snapshotState());
+}
+
+// -----------------------------------------------------
 // SOCKET.IO
 // -----------------------------------------------------
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
-  // Send current state to new client (main or team)
-  socket.emit("state", state);
+  // Send current state to new client (main or team) + serverNow
+  emitStateToSocket(socket);
 
   // ---------------------------------------------
   // TEAMS: joinGame (code + team name)
@@ -107,7 +125,9 @@ io.on("connection", (socket) => {
           points: 0,
         };
         state.teams.push(team);
-        io.emit("state", state);
+
+        // Broadcast updated state + serverNow
+        emitStateToAll();
       }
 
       socket.data.teamName = team.name;
@@ -149,8 +169,8 @@ io.on("connection", (socket) => {
       teams: newTeams,
     };
 
-    // 3) Broadcast new full state
-    io.emit("state", state);
+    // 3) Broadcast new full state + serverNow
+    emitStateToAll();
   });
 
   // ---------------------------------------------
