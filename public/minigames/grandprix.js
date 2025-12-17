@@ -1,16 +1,15 @@
-// public/minigames/grandprix.js v4
-// Fix: reliable URL compare + one-time audio unlock (no random autoplay) + robust play() handling.
+// public/minigames/grandprix.js v5
+// Adds: better diagnostics + safe retry-on-gesture if play() fails.
 // Keeps API: renderGrandprix(ch, api) + stopGrandprix()
 
 let audio = null;
 let playTimeout = null;
 
-// Track which resolved src we built audio for (audio.src becomes absolute)
 let audioSrcResolved = "";
-
-// One-time unlock so stricter browsers allow later play()
-let audioUnlocked = false;
 let unlockInstalled = false;
+
+// If autoplay fails, we arm a retry that runs on the next user gesture.
+let needsGestureRetry = false;
 
 function resolveUrl(url) {
   try {
@@ -20,37 +19,72 @@ function resolveUrl(url) {
   }
 }
 
-function installUnlockHandlers(api) {
+function audioErrorToText(a) {
+  // a.error is a MediaError (or null)
+  const err = a?.error;
+  if (!err) return "Ukendt audio-fejl (ingen MediaError).";
+  // MediaError codes: 1..4
+  const map = {
+    1: "ABORTED (afbrudt)",
+    2: "NETWORK (netværk/404/forbindelse)",
+    3: "DECODE (kan ikke afkode filen)",
+    4: "SRC_NOT_SUPPORTED (format/URL ikke understøttet)",
+  };
+  return `MediaError ${err.code}: ${map[err.code] || "Ukendt"}`;
+}
+
+async function tryPlay(api, why = "") {
+  if (!audio) return false;
+
+  try {
+    // Make sure it actually has a source and is loading
+    // (harmless if already loaded)
+    try { audio.load(); } catch {}
+
+    const p = audio.play();
+    if (p && typeof p.then === "function") await p;
+
+    needsGestureRetry = false;
+    return true;
+  } catch (err) {
+    // This is the important part: show what kind of failure it is.
+    console.error("Grandprix play() failed", { why, err, src: audio?.src });
+
+    // Typical cases:
+    // - NotAllowedError: autoplay policy / user gesture needed
+    // - NotSupportedError: codec/format not supported
+    // - AbortError: interrupted
+    const name = err?.name || "Error";
+    const msg = err?.message || "";
+
+    if (name === "NotAllowedError") {
+      needsGestureRetry = true;
+      api?.showStatus?.("⚠️ Browser blokerer afspilning. Klik på siden eller tryk BUZZ igen for at starte musikken.");
+    } else {
+      // Could be 404/network/decode. We show a more concrete hint.
+      api?.showStatus?.(`⚠️ Musik kunne ikke afspilles (${name}). Tjek konsol + Network for 404/codec.`);
+      // Also surface MediaError if present:
+      setTimeout(() => {
+        if (audio) console.warn("Grandprix audio element error:", audioErrorToText(audio), audio.src);
+      }, 0);
+    }
+
+    return false;
+  }
+}
+
+function installGestureRetry(api) {
   if (unlockInstalled) return;
   unlockInstalled = true;
 
-  const unlock = async () => {
-    if (audioUnlocked) return;
-    if (!audio) return;
-
-    // Attempt a muted micro-play to satisfy autoplay policies
-    const wasMuted = audio.muted;
-    audio.muted = true;
-
-    try {
-      const p = audio.play();
-      if (p && typeof p.then === "function") await p;
-
-      audio.pause();
-      try { audio.currentTime = 0; } catch {}
-
-      audioUnlocked = true;
-    } catch (err) {
-      // Do not spam UI; just a gentle hint if needed.
-      api?.showStatus?.("⚠️ Klik/tryk en tast hvis musikken ikke starter automatisk.");
-    } finally {
-      audio.muted = wasMuted;
-    }
+  const onGesture = () => {
+    if (!needsGestureRetry) return;
+    // Retry once on next gesture
+    tryPlay(api, "gesture-retry");
   };
 
-  // Cover mouse/touch + keyboard-only setups
-  document.addEventListener("pointerdown", unlock, { once: true, passive: true });
-  document.addEventListener("keydown", unlock, { once: true });
+  document.addEventListener("pointerdown", onGesture, { passive: true });
+  document.addEventListener("keydown", onGesture);
 }
 
 export function stopGrandprix() {
@@ -66,7 +100,9 @@ export function stopGrandprix() {
 
   audioSrcResolved = "";
   window.__grandprixAudio = null;
-  audioUnlocked = false;
+
+  needsGestureRetry = false;
+  window.__grandprixTryPlay = null;
 }
 
 export function renderGrandprix(ch, api) {
@@ -79,8 +115,7 @@ export function renderGrandprix(ch, api) {
     return;
   }
 
-  // Ensure unlock handlers are installed (safe)
-  installUnlockHandlers(api);
+  installGestureRetry(api);
 
   const resolved = resolveUrl(url);
 
@@ -90,18 +125,25 @@ export function renderGrandprix(ch, api) {
 
     audio = new Audio(resolved);
     audio.preload = "auto";
-    audio.playsInline = true; // harmless on desktop; helps iOS-ish cases
+    audio.playsInline = true;
 
-    // Trigger load early (sometimes helps)
-    try { audio.load(); } catch {}
+    // Optional: can help in some environments (not required)
+    // audio.crossOrigin = "anonymous";
+
+    // Log element-level errors (helps diagnose 404/decode)
+    audio.addEventListener("error", () => {
+      console.error("Grandprix <audio> error:", audioErrorToText(audio), audio.src);
+      api?.showStatus?.("⚠️ Musik fejlede at loade (tjek Network: mp3 404?).");
+    });
 
     audioSrcResolved = resolved;
     window.__grandprixAudio = audio;
 
-    audioUnlocked = false;
+    // Expose a manual retry hook (BUZZ can call it)
+    window.__grandprixTryPlay = () => tryPlay(api, "manual-tryPlay");
   }
 
-  // Cancel any pending play when state changes
+  // Cancel pending play on state change
   if (playTimeout) {
     clearTimeout(playTimeout);
     playTimeout = null;
@@ -118,15 +160,10 @@ export function renderGrandprix(ch, api) {
       playTimeout = null;
       if (!audio) return;
 
-      // Optional: start from beginning when entering listening
       try { audio.currentTime = 0; } catch {}
 
-      try {
-        await audio.play();
-      } catch (err) {
-        console.error("Grandprix audio play failed:", err);
-        api?.showStatus?.("⚠️ Musik kunne ikke starte automatisk. Tryk BUZZ (eller klik på skærmen) for at starte lyd.");
-      }
+      // Attempt autoplay (may fail on some machines; then we arm gesture retry)
+      await tryPlay(api, "listening-autoplay");
     }, waitMs);
 
     return;
@@ -138,7 +175,7 @@ export function renderGrandprix(ch, api) {
     return;
   }
 
-  // ended / null etc.
+  // ended / other
   api?.setBuzzEnabled?.(false);
   stopGrandprix();
 }
