@@ -1,5 +1,6 @@
-// public/team.js v41
-// Based on stable v40 + winner overlay
+// public/team.js v42
+// v41 + FIX: Grandprix countdown uses server time (prevents different PCs getting 125s etc.)
+// + FIX: Voice event + route already aligned with server.js ("send-voice" + "/uploads-audio/")
 
 // Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
@@ -48,6 +49,21 @@ let gpSentThisRound = false;
 
 // NisseGåden: remember if we already answered this riddle round
 let ngAnsweredRoundId = null;
+
+// ---------- SERVER TIME OFFSET (fixes countdown mismatch across PCs) ----------
+let serverOffsetMs = 0; // serverNow - Date.now()
+
+function nowServerMs() {
+  return Date.now() + serverOffsetMs;
+}
+
+function updateServerOffsetFromState(s) {
+  if (!s) return;
+  if (typeof s.serverNow === "number" && Number.isFinite(s.serverNow)) {
+    // Basic offset. (Optional: could smooth, but keep it simple/stable)
+    serverOffsetMs = s.serverNow - Date.now();
+  }
+}
 
 // ---------- SCORE TOAST (all teams see point changes) ----------
 let scoreToastEl = null;
@@ -335,8 +351,7 @@ function ensureNisseGaadenAnswer() {
 
   ngInput = document.createElement("input");
   ngInput.placeholder = "Skriv jeres svar her…";
-  ngInput.style.cssText =
-    "font-size:1.2rem; padding:10px; width:320px;";
+  ngInput.style.cssText = "font-size:1.2rem; padding:10px; width:320px;";
 
   ngBtn = document.createElement("button");
   ngBtn.textContent = "Send svar";
@@ -459,7 +474,8 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (gpPopupTimer) clearInterval(gpPopupTimer);
 
   function tick() {
-    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+    // FIX: Use server-time to compute elapsed
+    const elapsed = Math.floor((nowServerMs() - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     gpPopupCountdown.textContent = left;
 
@@ -551,6 +567,9 @@ function renderChallenge(ch) {
 socket.on("state", (s) => {
   if (!s) return;
 
+  // FIX: sync server offset ASAP (so countdown uses same origin everywhere)
+  updateServerOffsetFromState(s);
+
   if (s.gameCode) codeDisplay.textContent = s.gameCode;
 
   renderLeaderboard(s.teams || []);
@@ -591,6 +610,8 @@ socket.on("state", (s) => {
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
+  // IMPORTANT: countdownStartAt is now in SERVER time units.
+  // We MUST use it directly with nowServerMs() inside showGrandprixPopup().
   if (isLockedGP && ch.countdownStartAt) {
     showGrandprixPopup(
       ch.countdownStartAt,
