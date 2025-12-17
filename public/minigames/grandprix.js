@@ -1,6 +1,6 @@
 // public/minigames/grandprix.js v4
-// Fix: reliable URL compare + audio unlock on first user gesture + better play robustness.
-// Keeps the same public API: renderGrandprix(ch, api) + stopGrandprix().
+// Fix: reliable URL compare + one-time audio unlock (no random autoplay) + robust play() handling.
+// Keeps API: renderGrandprix(ch, api) + stopGrandprix()
 
 let audio = null;
 let playTimeout = null;
@@ -35,22 +35,20 @@ function installUnlockHandlers(api) {
     try {
       const p = audio.play();
       if (p && typeof p.then === "function") await p;
+
       audio.pause();
       try { audio.currentTime = 0; } catch {}
+
       audioUnlocked = true;
     } catch (err) {
-      // We don't hard-fail; BUZZ can still trigger a user gesture play attempt.
-      // But we keep a hint for the user if needed.
-      // console.debug("Audio unlock failed:", err);
-      if (api?.showStatus) {
-        api.showStatus("⚠️ Klik på skærmen / tryk en tast og prøv igen, hvis musikken ikke starter.");
-      }
+      // Do not spam UI; just a gentle hint if needed.
+      api?.showStatus?.("⚠️ Klik/tryk en tast hvis musikken ikke starter automatisk.");
     } finally {
       audio.muted = wasMuted;
     }
   };
 
-  // Use both pointerdown and keydown to cover mouse/touch/keyboard-only machines.
+  // Cover mouse/touch + keyboard-only setups
   document.addEventListener("pointerdown", unlock, { once: true, passive: true });
   document.addEventListener("keydown", unlock, { once: true });
 }
@@ -63,12 +61,12 @@ export function stopGrandprix() {
 
   if (audio) {
     try { audio.pause(); } catch {}
-    try { audio.currentTime = 0; } catch {}
     audio = null;
   }
 
   audioSrcResolved = "";
   window.__grandprixAudio = null;
+  audioUnlocked = false;
 }
 
 export function renderGrandprix(ch, api) {
@@ -81,7 +79,7 @@ export function renderGrandprix(ch, api) {
     return;
   }
 
-  // Ensure unlock handlers are installed (safe, no UI changes unless needed)
+  // Ensure unlock handlers are installed (safe)
   installUnlockHandlers(api);
 
   const resolved = resolveUrl(url);
@@ -92,19 +90,18 @@ export function renderGrandprix(ch, api) {
 
     audio = new Audio(resolved);
     audio.preload = "auto";
-    audio.playsInline = true; // iOS-ish safety; harmless elsewhere
+    audio.playsInline = true; // harmless on desktop; helps iOS-ish cases
 
-    // Try to force-load metadata early (helps some setups)
+    // Trigger load early (sometimes helps)
     try { audio.load(); } catch {}
 
     audioSrcResolved = resolved;
     window.__grandprixAudio = audio;
 
-    // Reset unlock flag per new audio instance
     audioUnlocked = false;
   }
 
-  // Always cancel any pending play when state changes
+  // Cancel any pending play when state changes
   if (playTimeout) {
     clearTimeout(playTimeout);
     playTimeout = null;
@@ -119,16 +116,14 @@ export function renderGrandprix(ch, api) {
 
     playTimeout = setTimeout(async () => {
       playTimeout = null;
-
       if (!audio) return;
 
-      // Start from beginning when entering listening
+      // Optional: start from beginning when entering listening
       try { audio.currentTime = 0; } catch {}
 
       try {
         await audio.play();
       } catch (err) {
-        // Useful debug + user hint
         console.error("Grandprix audio play failed:", err);
         api?.showStatus?.("⚠️ Musik kunne ikke starte automatisk. Tryk BUZZ (eller klik på skærmen) for at starte lyd.");
       }
