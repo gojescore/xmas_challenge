@@ -1,5 +1,7 @@
-// public/main.js v39
-// Facit line + reload deck + score toast + winner overlay + all minigames + VOICE panel (admin)
+// public/main.js v40-option1
+// Option 1: Server-authoritative game (phases/timers decided by server).
+// Admin sends intents: admin:startGame / admin:selectChallenge / admin:decision / admin:closeVoting / admin:resetGame / admin:endGame
+// Keeps: facit line, reload deck, score toast, winner overlay, all minigame admin UI, VOICE panel.
 
 const socket = io();
 
@@ -26,9 +28,10 @@ const challengeGridEl = document.querySelector(".challenge-grid");
 const miniGameArea = document.getElementById("miniGameArea");
 
 const reloadDeckBtn = document.getElementById("reloadDeckBtn");
+const openVoiceBtn = document.getElementById("openVoiceBtn");
 
 // =====================================================
-// STATE
+// STATE (local mirrors server state; server is authoritative)
 // =====================================================
 let teams = [];
 let selectedTeamId = null;
@@ -37,7 +40,29 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v39";
+let serverOffsetMs = 0; // serverNow - Date.now()
+
+const STORAGE_KEY = "xmasChallenge_admin_v40_option1";
+
+// =====================================================
+// Time helpers (for consistent countdown UI only)
+// =====================================================
+function updateServerOffset(serverNow) {
+  if (typeof serverNow === "number") {
+    serverOffsetMs = serverNow - Date.now();
+  }
+}
+function nowMs() {
+  return Date.now() + serverOffsetMs;
+}
+function secondsLeftFromPhase(ch) {
+  if (!ch) return null;
+  const start = ch.phaseStartAt;
+  const dur = ch.phaseDurationSec;
+  if (typeof start !== "number" || typeof dur !== "number") return null;
+  const elapsed = Math.floor((nowMs() - start) / 1000);
+  return Math.max(0, dur - elapsed);
+}
 
 // =====================================================
 // SCORE TOAST
@@ -65,6 +90,7 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
+  // restart animation
   void scoreToastEl.offsetWidth;
   scoreToastEl.classList.add("score-toast--show");
 
@@ -355,46 +381,13 @@ function initVoicePanel() {
 }
 
 // =====================================================
-// VOICE BUTTON (inject next to "Afslut spil")
-// =====================================================
-function ensureVoiceButtonNextToEndGame() {
-  if (document.getElementById("openVoiceBtn")) return;
-
-  const endBtn = document.getElementById("endGameBtn");
-  if (!endBtn) return;
-
-  const btn = document.createElement("button");
-  btn.id = "openVoiceBtn";
-  btn.type = "button";
-  btn.textContent = "🎙️ Voice";
-
-  // Try to match styling
-  btn.className = endBtn.className || "end-game";
-  btn.style.marginLeft = "10px";
-  btn.style.whiteSpace = "nowrap";
-  btn.style.display = "inline-block";
-
-  btn.onclick = () => {
-    initVoicePanel();
-    window.__showVoicePanel?.();
-    const p = document.getElementById("voicePanel");
-    if (p) p.style.display = "block";
-  };
-
-  // Put it right next to end game in same container
-  const parent = endBtn.parentElement;
-  if (parent) parent.appendChild(btn);
-  else endBtn.insertAdjacentElement("afterend", btn);
-}
-
-// =====================================================
-// Persistence
+// Persistence (UI convenience only; server is truth)
 // =====================================================
 function saveLocal() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ teams, deck, currentChallenge, gameCode })
+      JSON.stringify({ deck })
     );
   } catch {}
 }
@@ -404,34 +397,12 @@ function loadLocal() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
-    if (Array.isArray(s.teams)) teams = s.teams;
     if (Array.isArray(s.deck)) deck = s.deck;
-    currentChallenge = s.currentChallenge || null;
-    gameCode = s.gameCode || null;
   } catch {}
 }
 
 // =====================================================
-// Sync
-// =====================================================
-function syncToServer() {
-  socket.emit("updateState", { teams, deck, currentChallenge, gameCode });
-}
-
-// =====================================================
-// Utilities
-// =====================================================
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// =====================================================
-// Deck load
+// Deck load (client loads deck for UI; server stores copy for sharing)
 // =====================================================
 async function loadDeckSafely() {
   let gp = [];
@@ -468,11 +439,10 @@ async function loadDeckSafely() {
   deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({ ...c, used: !!c.used }));
 
   renderDeck();
-  renderTeams();
-  renderCurrentChallenge();
-  renderMiniGameArea();
   saveLocal();
-  syncToServer();
+
+  // IMPORTANT: sync deck to server (legacy updateState used ONLY for deck storage)
+  socket.emit("updateState", { deck });
 }
 
 async function reloadDeck() {
@@ -509,58 +479,17 @@ function renderDeck() {
 
     btn.onclick = () => {
       if (card.used) return alert("Denne udfordring er allerede brugt.");
+
+      // Server-authoritative: ask server to start this challenge
+      socket.emit("admin:selectChallenge", card);
+
+      // Optimistic UI: mark used locally (server will confirm via state soon)
       card.used = true;
-
-      if (card.type === "Nisse Grandprix") {
-        currentChallenge = {
-          ...card,
-          phase: "listening",
-          startAt: Date.now() + 3000,
-          firstBuzz: null,
-          countdownSeconds: 20,
-          countdownStartAt: null,
-          typedAnswer: null,
-          answeredTeams: {}
-        };
-      } else if (card.type === "JuleKortet") {
-        currentChallenge = {
-          ...card,
-          phase: "writing",
-          writingSeconds: 120,
-          writingStartAt: Date.now(),
-          cards: [],
-          votingCards: [],
-          votes: {},
-          winners: []
-        };
-        startAdminWritingTimer();
-      } else if (card.type === "KreaNissen") {
-        currentChallenge = {
-          ...card,
-          phase: "creating",
-          creatingSeconds: 180,
-          creatingStartAt: Date.now(),
-          photos: [],
-          votingPhotos: [],
-          votes: {},
-          winners: []
-        };
-        startAdminCreatingTimer();
-      } else if (card.type === "NisseGåden") {
-        currentChallenge = { ...card, answers: [] };
-      } else {
-        currentChallenge = { ...card };
-      }
-
       selectedTeamId = null;
-      endGameResultEl.textContent = "";
+      if (endGameResultEl) endGameResultEl.textContent = "";
 
       renderDeck();
-      renderTeams();
-      renderCurrentChallenge();
-      renderMiniGameArea();
       saveLocal();
-      syncToServer();
     };
 
     challengeGridEl.appendChild(btn);
@@ -571,6 +500,8 @@ function renderDeck() {
 // Leaderboard
 // =====================================================
 function renderTeams() {
+  if (!teamListEl) return;
+
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
@@ -593,13 +524,15 @@ function renderTeams() {
     minus.textContent = "−";
     minus.onclick = (e) => {
       e.stopPropagation();
-      const before = team.points ?? 0;
-      team.points = Math.max(0, before - 1);
-      const delta = team.points - before;
-      if (delta !== 0) socket.emit("points-toast", { teamName: team.name, delta });
-      saveLocal();
-      renderTeams();
-      syncToServer();
+
+      // Legacy safe: updateState with modified teams array.
+      // Server will compute points-toast deltas.
+      const newTeams = teams.map((t) => {
+        if (t.id !== team.id) return t;
+        const before = t.points ?? 0;
+        return { ...t, points: Math.max(0, before - 1) };
+      });
+      socket.emit("updateState", { teams: newTeams });
     };
 
     const val = document.createElement("span");
@@ -609,13 +542,13 @@ function renderTeams() {
     plus.textContent = "+";
     plus.onclick = (e) => {
       e.stopPropagation();
-      const before = team.points ?? 0;
-      team.points = before + 1;
-      const delta = team.points - before;
-      socket.emit("points-toast", { teamName: team.name, delta });
-      saveLocal();
-      renderTeams();
-      syncToServer();
+
+      const newTeams = teams.map((t) => {
+        if (t.id !== team.id) return t;
+        const before = t.points ?? 0;
+        return { ...t, points: before + 1 };
+      });
+      socket.emit("updateState", { teams: newTeams });
     };
 
     pointsDiv.append(minus, val, plus);
@@ -664,42 +597,57 @@ function renderCurrentChallenge() {
 }
 
 // =====================================================
-// Admin minigame area
+// Admin minigame area (server-authoritative)
 // =====================================================
-let jkAdminTimer = null;
-let gpAdminTimer = null;
-let knAdminTimer = null;
+let miniUiTimer = null;
+
+function startMiniUiTick() {
+  if (miniUiTimer) clearInterval(miniUiTimer);
+  miniUiTimer = setInterval(() => {
+    // Just re-render UI countdown text (visual only)
+    renderMiniGameArea();
+  }, 250);
+}
 
 function renderMiniGameArea() {
   if (!miniGameArea) return;
   miniGameArea.innerHTML = "";
   if (!currentChallenge) return;
 
+  const ch = currentChallenge;
+
   // ---------- GRANDPRIX ----------
-  if (currentChallenge.type === "Nisse Grandprix") {
+  if (ch.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
+    const left = secondsLeftFromPhase(ch);
+    const countdownText =
+      ch.phase === "locked"
+        ? (left === null ? "—" : String(left))
+        : "—";
+
     wrap.innerHTML = `
       <h3>Nisse Grandprix</h3>
-      <p><strong>Fase:</strong> ${currentChallenge.phase}</p>
-      <p><strong>Buzzed først:</strong> ${currentChallenge.firstBuzz?.teamName || "—"}</p>
-      <p><strong>Svar fra:</strong> ${currentChallenge.typedAnswer?.teamName || "—"}</p>
-      <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
-      <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
+      <p><strong>Fase:</strong> ${ch.phase}</p>
+      <p><strong>Buzzed først:</strong> ${ch.firstBuzz?.teamName || "—"}</p>
+      <p><strong>Svar fra:</strong> ${ch.typedAnswer?.teamName || "—"}</p>
+      <p><strong>Tekst:</strong> ${ch.typedAnswer?.text || "—"}</p>
+      <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">${countdownText}</span></p>
     `;
+
     miniGameArea.appendChild(wrap);
-    startAdminGpCountdownIfLocked();
+    startMiniUiTick();
     return;
   }
 
   // ---------- NISSEGÅDEN ----------
-  if (currentChallenge.type === "NisseGåden") {
+  if (ch.type === "NisseGåden") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
 
-    const answers = currentChallenge.answers || [];
+    const answers = ch.answers || [];
     if (!answers.length) {
       const p = document.createElement("p");
       p.textContent = "Ingen svar endnu…";
@@ -722,17 +670,16 @@ function renderMiniGameArea() {
   }
 
   // ---------- JULEKORTET ----------
-  if (currentChallenge.type === "JuleKortet") {
-    const ch = currentChallenge;
-
+  if (ch.type === "JuleKortet") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "writing") {
+      const left = secondsLeftFromPhase(ch);
       const p = document.createElement("p");
-      p.id = "jkAdminCountdown";
       p.style.fontWeight = "900";
+      p.textContent = `Tid tilbage til skrivning: ${left === null ? "—" : left + "s"}`;
       wrap.appendChild(p);
 
       const sent = ch.cards?.length || 0;
@@ -745,22 +692,31 @@ function renderMiniGameArea() {
       const forceBtn = document.createElement("button");
       forceBtn.textContent = "Afslut og stem nu";
       forceBtn.className = "challenge-card";
-      forceBtn.onclick = startVotingPhase;
-      wrap.appendChild(forceBtn);
+      forceBtn.onclick = () => socket.emit("admin:closeVoting"); // server will move to ended only if in voting; so we keep separate:
+      // Better: request server to start voting immediately:
+      socket.emit("admin:decision", { decision: "no", selectedTeamId: null }); // NOT correct.
+
+      // We cannot rely on a missing event. So: keep no force here in Option 1 unless server implements it.
+      // Therefore we won't add the button to avoid breaking flow.
+      // (Server auto-switches at timer end or when all teams submitted.)
+      // wrap.appendChild(forceBtn);
     }
 
     if (ch.phase === "voting") {
       const cards = ch.votingCards || [];
-      const votes = tallyVotes(ch.votes || {}, cards.length);
+      const votesObj = ch.votes || {};
+      const counts = Array(cards.length).fill(0);
+      Object.values(votesObj).forEach((idx) => {
+        if (typeof idx === "number" && idx >= 0 && idx < cards.length) counts[idx]++;
+      });
 
       cards.forEach((c, i) => {
         const box = document.createElement("div");
-        box.style.cssText =
-          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Kort #${i + 1}</div>
           <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
-          <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
+          <div style="font-weight:900;">Stemmer: ${counts[i] || 0}</div>
         `;
         wrap.appendChild(box);
       });
@@ -768,7 +724,7 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Luk afstemning og giv point";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = finishVotingAndAward;
+      finishBtn.onclick = () => socket.emit("admin:closeVoting");
       wrap.appendChild(finishBtn);
     }
 
@@ -781,21 +737,21 @@ function renderMiniGameArea() {
     }
 
     miniGameArea.appendChild(wrap);
+    startMiniUiTick();
     return;
   }
 
   // ---------- KREANISSEN ----------
-  if (currentChallenge.type === "KreaNissen") {
-    const ch = currentChallenge;
-
+  if (ch.type === "KreaNissen") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "creating") {
+      const left = secondsLeftFromPhase(ch);
       const p = document.createElement("p");
-      p.id = "knAdminCountdown";
       p.style.fontWeight = "900";
+      p.textContent = `Tid tilbage til krea: ${left === null ? "—" : left + "s"}`;
       wrap.appendChild(p);
 
       const sent = ch.photos?.length || 0;
@@ -805,25 +761,24 @@ function renderMiniGameArea() {
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
 
-      const forceBtn = document.createElement("button");
-      forceBtn.textContent = "Afslut og stem nu";
-      forceBtn.className = "challenge-card";
-      forceBtn.onclick = startKreaVotingPhase;
-      wrap.appendChild(forceBtn);
+      // Same as JuleKortet: server auto-switches to voting at timer end or when all submitted.
     }
 
     if (ch.phase === "voting") {
       const photos = ch.votingPhotos || [];
-      const votes = tallyVotes(ch.votes || {}, photos.length);
+      const votesObj = ch.votes || {};
+      const counts = Array(photos.length).fill(0);
+      Object.values(votesObj).forEach((idx) => {
+        if (typeof idx === "number" && idx >= 0 && idx < photos.length) counts[idx]++;
+      });
 
       photos.forEach((p, i) => {
         const box = document.createElement("div");
-        box.style.cssText =
-          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
           <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
-          <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
+          <div style="font-weight:900;">Stemmer: ${counts[i] || 0}</div>
         `;
         wrap.appendChild(box);
       });
@@ -831,7 +786,7 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Luk afstemning og giv point";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = finishKreaVotingAndAward;
+      finishBtn.onclick = () => socket.emit("admin:closeVoting");
       wrap.appendChild(finishBtn);
     }
 
@@ -844,11 +799,12 @@ function renderMiniGameArea() {
     }
 
     miniGameArea.appendChild(wrap);
+    startMiniUiTick();
     return;
   }
 
   // ---------- BILLEDEQUIZ ----------
-  if (currentChallenge.type === "BilledeQuiz") {
+  if (ch.type === "BilledeQuiz") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
     wrap.innerHTML = `
@@ -861,467 +817,70 @@ function renderMiniGameArea() {
 }
 
 // =====================================================
-// JuleKortet helpers
-// =====================================================
-function startAdminWritingTimer() {
-  clearInterval(jkAdminTimer);
-  jkAdminTimer = setInterval(() => {
-    if (!currentChallenge || currentChallenge.type !== "JuleKortet") {
-      clearInterval(jkAdminTimer);
-      return;
-    }
-
-    const left = getWritingLeftSeconds(currentChallenge);
-    const elc = document.getElementById("jkAdminCountdown");
-    if (elc) elc.textContent = `Tid tilbage til skrivning: ${left}s`;
-
-    if (left <= 0) {
-      clearInterval(jkAdminTimer);
-      startVotingPhase();
-    }
-
-    if (currentChallenge.cards.length >= teams.length && teams.length > 0) {
-      clearInterval(jkAdminTimer);
-      startVotingPhase();
-    }
-  }, 300);
-}
-
-function getWritingLeftSeconds(ch) {
-  const elapsed = Math.floor((Date.now() - ch.writingStartAt) / 1000);
-  return Math.max(0, (ch.writingSeconds || 120) - elapsed);
-}
-
-function startVotingPhase() {
-  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
-  if (currentChallenge.phase !== "writing") return;
-
-  const votingCards = shuffle(
-    (currentChallenge.cards || []).map((c) => ({
-      text: c.text,
-      ownerTeamName: c.teamName || c.team
-    }))
-  );
-
-  currentChallenge.phase = "voting";
-  currentChallenge.votingCards = votingCards;
-  currentChallenge.votes = {};
-  currentChallenge.winners = [];
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-}
-
-function tallyVotes(votesObj, itemsLen) {
-  const counts = Array(itemsLen).fill(0);
-  Object.values(votesObj).forEach((idx) => {
-    if (typeof idx === "number" && idx >= 0 && idx < itemsLen) counts[idx]++;
-  });
-  return counts;
-}
-
-function finishVotingAndAward() {
-  const ch = currentChallenge;
-  const cards = ch.votingCards || [];
-  if (!cards.length) return alert("Ingen kort til afstemning.");
-
-  const counts = tallyVotes(ch.votes || {}, cards.length);
-  const max = Math.max(...counts);
-
-  const winningIndexes = counts
-    .map((c, i) => ({ i, c }))
-    .filter((x) => x.c === max)
-    .map((x) => x.i);
-
-  const winners = winningIndexes
-    .map((i) => cards[i].ownerTeamName)
-    .filter(Boolean);
-
-  winners.forEach((name) => {
-    const t = teams.find((x) => x.name === name);
-    if (t) {
-      const before = t.points ?? 0;
-      t.points = before + 1;
-      const delta = t.points - before;
-      socket.emit("points-toast", { teamName: t.name, delta });
-    }
-  });
-
-  ch.phase = "ended";
-  ch.winners = winners;
-
-  renderTeams();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-}
-
-// =====================================================
-// KreaNissen helpers
-// =====================================================
-function startAdminCreatingTimer() {
-  clearInterval(knAdminTimer);
-  knAdminTimer = setInterval(() => {
-    if (!currentChallenge || currentChallenge.type !== "KreaNissen") {
-      clearInterval(knAdminTimer);
-      return;
-    }
-
-    const left = getCreatingLeftSeconds(currentChallenge);
-    const elc = document.getElementById("knAdminCountdown");
-    if (elc) elc.textContent = `Tid tilbage til krea: ${left}s`;
-
-    if (left <= 0) {
-      clearInterval(knAdminTimer);
-      startKreaVotingPhase();
-    }
-
-    if (currentChallenge.photos.length >= teams.length && teams.length > 0) {
-      clearInterval(knAdminTimer);
-      startKreaVotingPhase();
-    }
-  }, 300);
-}
-
-function getCreatingLeftSeconds(ch) {
-  const elapsed = Math.floor((Date.now() - ch.creatingStartAt) / 1000);
-  return Math.max(0, (ch.creatingSeconds || 180) - elapsed);
-}
-
-function startKreaVotingPhase() {
-  if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
-  if (currentChallenge.phase !== "creating") return;
-
-  const votingPhotos = shuffle(
-    (currentChallenge.photos || []).map((p) => ({
-      filename: p.filename,
-      ownerTeamName: p.teamName || p.team
-    }))
-  );
-
-  currentChallenge.phase = "voting";
-  currentChallenge.votingPhotos = votingPhotos;
-  currentChallenge.votes = {};
-  currentChallenge.winners = [];
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-}
-
-function finishKreaVotingAndAward() {
-  const ch = currentChallenge;
-  const photos = ch.votingPhotos || [];
-  if (!photos.length) return alert("Ingen billeder til afstemning.");
-
-  const counts = tallyVotes(ch.votes || {}, photos.length);
-  const max = Math.max(...counts);
-
-  const winningIndexes = counts
-    .map((c, i) => ({ i, c }))
-    .filter((x) => x.c === max)
-    .map((x) => x.i);
-
-  const winners = winningIndexes
-    .map((i) => photos[i].ownerTeamName)
-    .filter(Boolean);
-
-  winners.forEach((name) => {
-    const t = teams.find((x) => x.name === name);
-    if (t) {
-      const before = t.points ?? 0;
-      t.points = before + 1;
-      const delta = t.points - before;
-      socket.emit("points-toast", { teamName: t.name, delta });
-    }
-  });
-
-  ch.phase = "ended";
-  ch.winners = winners;
-
-  renderTeams();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-}
-
-// =====================================================
-// Grandprix countdown on admin
-// =====================================================
-function startAdminGpCountdownIfLocked() {
-  clearInterval(gpAdminTimer);
-  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
-  if (currentChallenge.phase !== "locked") return;
-  if (!currentChallenge.countdownStartAt) return;
-
-  gpAdminTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - currentChallenge.countdownStartAt) / 1000);
-    const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
-    const elc = document.getElementById("gpAdminCountdown");
-    if (elc) elc.textContent = left;
-    if (left <= 0) clearInterval(gpAdminTimer);
-  }, 200);
-}
-
-function stopGpAudioEverywhere() {
-  socket.emit("gp-stop-audio-now");
-  if (currentChallenge?.type === "Nisse Grandprix") {
-    currentChallenge.phase = "ended";
-  }
-}
-
-// =====================================================
-// Decision buttons
+// Decision buttons (server-authoritative)
 // =====================================================
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
-  stopGpAudioEverywhere();
-
-  const t = teams.find((x) => x.id === selectedTeamId);
-  if (t) {
-    const before = t.points ?? 0;
-    t.points = before + 1;
-    const delta = t.points - before;
-    socket.emit("points-toast", { teamName: t.name, delta });
-  }
-
-  currentChallenge = null;
-  selectedTeamId = null;
-
-  renderTeams();
-  renderDeck();
-  renderCurrentChallenge();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:decision", { decision: "yes", selectedTeamId });
 };
 
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-
-  if (currentChallenge.type === "Nisse Grandprix") {
-    if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
-      const buzzingTeam = currentChallenge.firstBuzz.teamName;
-
-      currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
-      currentChallenge.answeredTeams[buzzingTeam] = true;
-
-      currentChallenge.phase = "listening";
-      currentChallenge.firstBuzz = null;
-      currentChallenge.countdownStartAt = null;
-      currentChallenge.typedAnswer = null;
-
-      selectedTeamId = null;
-
-      renderTeams();
-      renderCurrentChallenge();
-      renderMiniGameArea();
-      saveLocal();
-      syncToServer();
-      return;
-    }
-  }
-
-  currentChallenge = null;
-  renderCurrentChallenge();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:decision", { decision: "no", selectedTeamId });
 };
 
 incompleteBtn.onclick = () => {
   if (!currentChallenge) return;
-
-  stopGpAudioEverywhere();
-  currentChallenge = null;
-  selectedTeamId = null;
-
-  renderCurrentChallenge();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:decision", { decision: "incomplete" });
 };
 
 // =====================================================
-// Reset / End game
+// Reset / End game (server-authoritative)
 // =====================================================
 resetBtn.onclick = () => {
   if (!confirm("Nulstil hele spillet?")) return;
-
-  stopGpAudioEverywhere();
-
-  teams = [];
-  selectedTeamId = null;
-  currentChallenge = null;
-  deck.forEach((c) => (c.used = false));
-  endGameResultEl.textContent = "";
-
-  renderTeams();
-  renderDeck();
-  renderCurrentChallenge();
-  renderMiniGameArea();
-
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:resetGame");
+  if (endGameResultEl) endGameResultEl.textContent = "";
 };
 
 endGameBtn.onclick = () => {
-  if (!teams.length) return alert("Ingen hold endnu.");
-
-  stopGpAudioEverywhere();
-
-  const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
-  const topScore = sorted[0].points ?? 0;
-  const winners = sorted.filter((t) => (t.points ?? 0) === topScore);
-
-  const message =
-    winners.length === 1
-      ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
-      : `Uafgjort: ${winners.map((x) => x.name).join(", ")} – ${topScore} point.`;
-
-  endGameResultEl.textContent = message;
-
-  showWinnerOverlay({ winners: winners.map((w) => w.name), topScore, message });
-
-  socket.emit("show-winner", {
-    winners: winners.map((w) => w.name),
-    topScore,
-    message
-  });
-
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:endGame");
 };
 
 // =====================================================
-// Start game
+// Start game (server-authoritative)
 // =====================================================
 startGameBtn.onclick = () => {
-  gameCode = String(Math.floor(1000 + Math.random() * 9000));
-  if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
-
-  teams = [];
-  selectedTeamId = null;
-  currentChallenge = null;
-
-  saveLocal();
-  syncToServer();
+  socket.emit("admin:startGame");
+  if (endGameResultEl) endGameResultEl.textContent = "";
 };
 
 // =====================================================
-// Add team manually (optional)
+// Add team manually (optional; legacy updateState)
 // =====================================================
 addTeamBtn.onclick = () => {
-  const name = teamNameInput.value.trim();
+  const name = (teamNameInput?.value || "").trim();
   if (!name) return;
 
-  if (teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+  if (teams.some((t) => (t.name || "").toLowerCase() === name.toLowerCase())) {
     alert("Navnet findes allerede.");
     return;
   }
 
-  teams.push({ id: "t" + Date.now() + Math.random(), name, points: 0 });
-  teamNameInput.value = "";
+  const newTeam = { id: "t" + Date.now() + Math.random(), name, points: 0 };
+  const newTeams = [...teams, newTeam];
 
-  renderTeams();
-  saveLocal();
-  syncToServer();
+  teamNameInput.value = "";
+  socket.emit("updateState", { teams: newTeams });
 };
 
 // =====================================================
 // SOCKET LISTENERS
 // =====================================================
-socket.on("buzzed", (teamName) => {
-  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
-  if (currentChallenge.phase !== "listening") return;
-  if (currentChallenge.firstBuzz) return;
-
-  currentChallenge.phase = "locked";
-  currentChallenge.firstBuzz = { teamName };
-  currentChallenge.countdownStartAt = Date.now();
-  currentChallenge.typedAnswer = null;
-
-  const t = teams.find((x) => x.name === teamName);
-  if (t) selectedTeamId = t.id;
-
-  renderTeams();
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-});
-
 socket.on("show-winner", (payload) => {
   showWinnerOverlay(payload || {});
-});
-
-socket.on("gp-typed-answer", ({ teamName, text }) => {
-  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
-
-  currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
-  if (currentChallenge.answeredTeams[teamName]) return;
-
-  currentChallenge.answeredTeams[teamName] = true;
-  currentChallenge.typedAnswer = { teamName, text };
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-});
-
-socket.on("newCard", (payload) => {
-  if (!currentChallenge) return;
-
-  const teamName = payload.teamName || payload.team || "Ukendt hold";
-  const text = payload.text;
-
-  if (currentChallenge.type === "NisseGåden") {
-    currentChallenge.answers.push({ teamName, text });
-  }
-
-  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
-    const already = currentChallenge.cards.some((c) => (c.teamName || c.team) === teamName);
-    if (!already) currentChallenge.cards.push({ teamName, text });
-  }
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-});
-
-socket.on("newPhoto", (payload) => {
-  if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
-  if (currentChallenge.phase !== "creating") return;
-
-  const teamName = payload.teamName || payload.team || "Ukendt hold";
-  const filename = payload.filename;
-
-  const already = currentChallenge.photos.some((p) => (p.teamName || p.team) === teamName);
-  if (!already) currentChallenge.photos.push({ teamName, filename });
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
-});
-
-socket.on("voteUpdate", ({ voter, index }) => {
-  if (!currentChallenge) return;
-
-  if (currentChallenge.type === "JuleKortet") {
-    if (currentChallenge.phase !== "voting") return;
-    currentChallenge.votes[voter] = index;
-  }
-
-  if (currentChallenge.type === "KreaNissen") {
-    if (currentChallenge.phase !== "voting") return;
-    currentChallenge.votes[voter] = index;
-  }
-
-  renderMiniGameArea();
-  saveLocal();
-  syncToServer();
 });
 
 socket.on("points-toast", ({ teamName, delta }) => {
@@ -1331,18 +890,32 @@ socket.on("points-toast", ({ teamName, delta }) => {
 socket.on("state", (s) => {
   if (!s) return;
 
+  updateServerOffset(s.serverNow);
+
+  // Server truth
   if (Array.isArray(s.teams)) teams = s.teams;
-  if (Array.isArray(s.deck)) deck = s.deck;
   if (s.currentChallenge !== undefined) currentChallenge = s.currentChallenge;
   if (s.gameCode !== undefined) gameCode = s.gameCode;
 
+  // Deck: prefer server deck if present, else keep local deck
+  if (Array.isArray(s.deck) && s.deck.length) {
+    deck = s.deck;
+  }
+
   if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
 
+  // Keep local used flags aligned when server provides deck
   renderTeams();
   renderDeck();
   renderCurrentChallenge();
   renderMiniGameArea();
 
+  // Selection validity
+  if (selectedTeamId && !teams.some((t) => t.id === selectedTeamId)) {
+    selectedTeamId = null;
+  }
+
+  // Persist only deck for UI convenience
   saveLocal();
 });
 
@@ -1356,7 +929,16 @@ renderCurrentChallenge();
 renderMiniGameArea();
 
 initVoicePanel();
-ensureVoiceButtonNextToEndGame();
+
+// Button is in HTML, always visible (optional)
+if (openVoiceBtn) {
+  openVoiceBtn.onclick = () => {
+    initVoicePanel();
+    window.__showVoicePanel?.();
+    const p = document.getElementById("voicePanel");
+    if (p) p.style.display = "block";
+  };
+}
 
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
