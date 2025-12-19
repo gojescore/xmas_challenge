@@ -1,8 +1,12 @@
-// public/main.js v41-option1-fixed
-// Fixes:
-// - Auto-select Grandprix first buzz team so YES awards correctly without manual selection
-// - Still supports manual selection for non-Grandprix challenges
-// - No changes to your deck load, voice panel, or other UI flows
+// public/main.js v40-option1 (fixed voting button “stutter”)
+// Fix:
+// - The voting “Luk afstemning og giv point” button was being recreated every 250ms because
+//   renderMiniGameArea() was re-rendering on an interval even during voting.
+// - Now we ONLY run the 250ms tick when a countdown is actually shown (Grandprix locked,
+//   JuleKortet writing, KreaNissen creating). During voting/ended there is NO tick,
+//   so clicks are reliable.
+//
+// Keeps: facit line, reload deck, score toast, winner overlay, all minigame admin UI, VOICE panel.
 
 const socket = io();
 
@@ -32,7 +36,7 @@ const reloadDeckBtn = document.getElementById("reloadDeckBtn");
 const openVoiceBtn = document.getElementById("openVoiceBtn");
 
 // =====================================================
-// STATE
+// STATE (local mirrors server state; server is authoritative)
 // =====================================================
 let teams = [];
 let selectedTeamId = null;
@@ -41,14 +45,17 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-let serverOffsetMs = 0;
+let serverOffsetMs = 0; // serverNow - Date.now()
+
 const STORAGE_KEY = "xmasChallenge_admin_v40_option1";
 
 // =====================================================
-// Time helpers (visual only)
+// Time helpers (for consistent countdown UI only)
 // =====================================================
 function updateServerOffset(serverNow) {
-  if (typeof serverNow === "number") serverOffsetMs = serverNow - Date.now();
+  if (typeof serverNow === "number") {
+    serverOffsetMs = serverNow - Date.now();
+  }
 }
 function nowMs() {
   return Date.now() + serverOffsetMs;
@@ -88,6 +95,7 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
+  // restart animation
   void scoreToastEl.offsetWidth;
   scoreToastEl.classList.add("score-toast--show");
 
@@ -164,8 +172,16 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
             Vinder af Xmas Challenge
           </h1>
 
-          <p id="winnerOverlayMessage" style="font-size:1.35rem; margin:0 0 0.6rem;"></p>
-          <p id="winnerOverlayNames" style="font-size:2rem; font-weight:900; margin:0 0 0.3rem;"></p>
+          <p id="winnerOverlayMessage" style="
+            font-size:1.35rem;
+            margin:0 0 0.6rem;
+          "></p>
+
+          <p id="winnerOverlayNames" style="
+            font-size:2rem;
+            font-weight:900;
+            margin:0 0 0.3rem;
+          "></p>
 
           <p style="font-size:1.1rem; margin:0 0 0.8rem;">
             Score: <span id="winnerOverlayScore"></span> point
@@ -190,8 +206,16 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   const scoreEl = winnerOverlayEl.querySelector("#winnerOverlayScore");
 
   if (msgEl) msgEl.textContent = message || "";
-  if (namesEl) namesEl.textContent = winners?.length ? winners.join(", ") : "Ingen vinder fundet";
-  if (scoreEl) scoreEl.textContent = Number.isFinite(topScore) ? String(topScore) : "0";
+  if (namesEl) {
+    namesEl.textContent =
+      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
+  }
+  if (scoreEl) {
+    scoreEl.textContent =
+      typeof topScore === "number" && !Number.isNaN(topScore)
+        ? String(topScore)
+        : "0";
+  }
 
   winnerOverlayEl.style.display = "flex";
 }
@@ -362,11 +386,14 @@ function initVoicePanel() {
 }
 
 // =====================================================
-// Persistence (UI convenience only)
+// Persistence (UI convenience only; server is truth)
 // =====================================================
 function saveLocal() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ deck }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ deck })
+    );
   } catch {}
 }
 
@@ -380,7 +407,7 @@ function loadLocal() {
 }
 
 // =====================================================
-// Deck load
+// Deck load (client loads deck for UI; server stores copy for sharing)
 // =====================================================
 async function loadDeckSafely() {
   let gp = [];
@@ -419,12 +446,14 @@ async function loadDeckSafely() {
   renderDeck();
   saveLocal();
 
+  // IMPORTANT: sync deck to server (legacy updateState used ONLY for deck storage)
   socket.emit("updateState", { deck });
 }
 
 async function reloadDeck() {
   await loadDeckSafely();
 }
+
 reloadDeckBtn?.addEventListener("click", reloadDeck);
 
 // =====================================================
@@ -498,6 +527,7 @@ function renderTeams() {
     minus.textContent = "−";
     minus.onclick = (e) => {
       e.stopPropagation();
+
       const newTeams = teams.map((t) => {
         if (t.id !== team.id) return t;
         const before = t.points ?? 0;
@@ -513,6 +543,7 @@ function renderTeams() {
     plus.textContent = "+";
     plus.onclick = (e) => {
       e.stopPropagation();
+
       const newTeams = teams.map((t) => {
         if (t.id !== team.id) return t;
         const before = t.points ?? 0;
@@ -550,15 +581,15 @@ function renderCurrentChallenge() {
 
   let facitText = currentChallenge.answer || "";
   if (!facitText) {
-    if (String(currentChallenge.type).includes("Grandprix")) {
+    if (currentChallenge.type === "Nisse Grandprix") {
       facitText = "Eleverne lytter til sangen og buzzer, når de kender svaret.";
-    } else if (String(currentChallenge.type).toLowerCase().includes("nisse")) {
+    } else if (currentChallenge.type === "NisseGåden") {
       facitText = "Eleverne skal gætte gåden og skrive deres svar.";
-    } else if (String(currentChallenge.type).toLowerCase().includes("jule")) {
+    } else if (currentChallenge.type === "JuleKortet") {
       facitText = "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
-    } else if (String(currentChallenge.type).toLowerCase().includes("krea")) {
+    } else if (currentChallenge.type === "KreaNissen") {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
-    } else if (String(currentChallenge.type).toLowerCase().includes("billede")) {
+    } else if (currentChallenge.type === "BilledeQuiz") {
       facitText = "Se på billedet og løs opgaven.";
     }
   }
@@ -567,27 +598,42 @@ function renderCurrentChallenge() {
 }
 
 // =====================================================
-// Admin minigame area
+// Admin minigame area (server-authoritative)
+// FIX: Only tick when a countdown is shown (prevents voting button stutter).
 // =====================================================
 let miniUiTimer = null;
+let closeVotingLocked = false;
+
+function stopMiniUiTick() {
+  if (miniUiTimer) clearInterval(miniUiTimer);
+  miniUiTimer = null;
+}
 
 function startMiniUiTick() {
   if (miniUiTimer) clearInterval(miniUiTimer);
   miniUiTimer = setInterval(() => {
-    renderMiniGameArea();
+    renderMiniGameArea(); // visual countdown refresh only
   }, 250);
 }
 
 function renderMiniGameArea() {
   if (!miniGameArea) return;
   miniGameArea.innerHTML = "";
-  if (!currentChallenge) return;
+  if (!currentChallenge) {
+    stopMiniUiTick();
+    return;
+  }
 
   const ch = currentChallenge;
 
+  // Default: do NOT tick. We enable it only in phases with a visible countdown.
+  stopMiniUiTick();
+
+  // ---------- GRANDPRIX ----------
   if (ch.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     const left = secondsLeftFromPhase(ch);
     const countdownText =
@@ -605,13 +651,18 @@ function renderMiniGameArea() {
     `;
 
     miniGameArea.appendChild(wrap);
-    startMiniUiTick();
+
+    // Tick ONLY while locked countdown is visible
+    if (ch.phase === "locked") startMiniUiTick();
+
     return;
   }
 
+  // ---------- NISSEGÅDEN ----------
   if (ch.type === "NisseGåden") {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
 
     const answers = ch.answers || [];
@@ -636,9 +687,11 @@ function renderMiniGameArea() {
     return;
   }
 
+  // ---------- JULEKORTET ----------
   if (ch.type === "JuleKortet") {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "writing") {
@@ -654,6 +707,9 @@ function renderMiniGameArea() {
       stat.textContent = `Modtaget: ${sent}/${total} julekort`;
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
+
+      // Tick ONLY while writing countdown is visible
+      startMiniUiTick();
     }
 
     if (ch.phase === "voting") {
@@ -666,7 +722,8 @@ function renderMiniGameArea() {
 
       cards.forEach((c, i) => {
         const box = document.createElement("div");
-        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText =
+          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Kort #${i + 1}</div>
           <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
@@ -678,7 +735,22 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Luk afstemning og giv point";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = () => socket.emit("admin:closeVoting");
+
+      finishBtn.onclick = () => {
+        // Small lock to avoid double-send + makes clicks feel “acknowledged”
+        if (closeVotingLocked) return;
+        closeVotingLocked = true;
+        finishBtn.disabled = true;
+
+        socket.emit("admin:closeVoting");
+
+        setTimeout(() => {
+          closeVotingLocked = false;
+          // It’s okay if server already changed phase; button will disappear on next state.
+          finishBtn.disabled = false;
+        }, 800);
+      };
+
       wrap.appendChild(finishBtn);
     }
 
@@ -686,18 +758,21 @@ function renderMiniGameArea() {
       const winners = ch.winners || [];
       const p = document.createElement("p");
       p.style.fontWeight = "900";
-      p.textContent = winners.length ? `Vindere: ${winners.join(", ")}` : "Ingen vinder fundet.";
+      p.textContent = winners.length
+        ? `Vindere: ${winners.join(", ")}`
+        : "Ingen vinder fundet.";
       wrap.appendChild(p);
     }
 
     miniGameArea.appendChild(wrap);
-    startMiniUiTick();
     return;
   }
 
+  // ---------- KREANISSEN ----------
   if (ch.type === "KreaNissen") {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "creating") {
@@ -713,6 +788,9 @@ function renderMiniGameArea() {
       stat.textContent = `Modtaget: ${sent}/${total} billeder`;
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
+
+      // Tick ONLY while creating countdown is visible
+      startMiniUiTick();
     }
 
     if (ch.phase === "voting") {
@@ -725,7 +803,8 @@ function renderMiniGameArea() {
 
       photos.forEach((p, i) => {
         const box = document.createElement("div");
-        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText =
+          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
           <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
@@ -737,7 +816,20 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Luk afstemning og giv point";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = () => socket.emit("admin:closeVoting");
+
+      finishBtn.onclick = () => {
+        if (closeVotingLocked) return;
+        closeVotingLocked = true;
+        finishBtn.disabled = true;
+
+        socket.emit("admin:closeVoting");
+
+        setTimeout(() => {
+          closeVotingLocked = false;
+          finishBtn.disabled = false;
+        }, 800);
+      };
+
       wrap.appendChild(finishBtn);
     }
 
@@ -745,18 +837,21 @@ function renderMiniGameArea() {
       const winners = ch.winners || [];
       const p = document.createElement("p");
       p.style.fontWeight = "900";
-      p.textContent = winners.length ? `Vindere: ${winners.join(", ")}` : "Ingen vinder fundet.";
+      p.textContent = winners.length
+        ? `Vindere: ${winners.join(", ")}`
+        : "Ingen vinder fundet.";
       wrap.appendChild(p);
     }
 
     miniGameArea.appendChild(wrap);
-    startMiniUiTick();
     return;
   }
 
+  // ---------- BILLEDEQUIZ ----------
   if (ch.type === "BilledeQuiz") {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
     wrap.innerHTML = `
       <h3>Billedquiz</h3>
       <p>Holdene ser billedet på deres egne skærme.</p>
@@ -769,27 +864,8 @@ function renderMiniGameArea() {
 // =====================================================
 // Decision buttons (server-authoritative)
 // =====================================================
-function autoPickGrandprixTeamIdIfPossible() {
-  const ch = currentChallenge;
-  if (!ch || ch.type !== "Nisse Grandprix") return null;
-  if (!(ch.phase === "locked" || ch.phase === "awaiting")) return null;
-
-  const buzzName = ch.firstBuzz?.teamName;
-  if (!buzzName) return null;
-
-  const team = teams.find((t) => (t.name || "").toLowerCase() === String(buzzName).toLowerCase());
-  return team?.id || null;
-}
-
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-
-  // FIX: Auto-pick the first buzz team in Grandprix if nothing is selected
-  if (!selectedTeamId) {
-    const autoId = autoPickGrandprixTeamIdIfPossible();
-    if (autoId) selectedTeamId = autoId;
-  }
-
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
   socket.emit("admin:decision", { decision: "yes", selectedTeamId });
@@ -806,7 +882,7 @@ incompleteBtn.onclick = () => {
 };
 
 // =====================================================
-// Reset / End game
+// Reset / End game (server-authoritative)
 // =====================================================
 resetBtn.onclick = () => {
   if (!confirm("Nulstil hele spillet?")) return;
@@ -819,7 +895,7 @@ endGameBtn.onclick = () => {
 };
 
 // =====================================================
-// Start game
+// Start game (server-authoritative)
 // =====================================================
 startGameBtn.onclick = () => {
   socket.emit("admin:startGame");
@@ -827,7 +903,7 @@ startGameBtn.onclick = () => {
 };
 
 // =====================================================
-// Add team manually (legacy updateState)
+// Add team manually (optional; legacy updateState)
 // =====================================================
 addTeamBtn.onclick = () => {
   const name = (teamNameInput?.value || "").trim();
@@ -865,21 +941,20 @@ socket.on("state", (s) => {
   if (s.currentChallenge !== undefined) currentChallenge = s.currentChallenge;
   if (s.gameCode !== undefined) gameCode = s.gameCode;
 
-  if (Array.isArray(s.deck) && s.deck.length) deck = s.deck;
+  if (Array.isArray(s.deck) && s.deck.length) {
+    deck = s.deck;
+  }
 
   if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
-  // FIX: Auto-select GP firstBuzz team when entering locked/awaiting
-  const autoId = autoPickGrandprixTeamIdIfPossible();
-  if (autoId) selectedTeamId = autoId;
-
-  // validate selection
-  if (selectedTeamId && !teams.some((t) => t.id === selectedTeamId)) selectedTeamId = null;
 
   renderTeams();
   renderDeck();
   renderCurrentChallenge();
   renderMiniGameArea();
+
+  if (selectedTeamId && !teams.some((t) => t.id === selectedTeamId)) {
+    selectedTeamId = null;
+  }
 
   saveLocal();
 });
