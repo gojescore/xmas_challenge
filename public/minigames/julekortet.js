@@ -1,10 +1,18 @@
-// public/minigames/julekortet.js v5
-// Same behaviour as v4, but now shows ch.text from the deck as the prompt.
+// public/minigames/julekortet.js v6
+// Option 1 compatible:
+// - Uses server fields: ch.phaseStartAt + ch.phaseDurationSec
+// - Countdown uses api.nowMs() (server-synced) when available
+// - Resets hasSubmitted/hasVoted when a new round arrives (ch.id changes)
+// - Shows ch.text as prompt as you already wanted
 
 let writingTimer = null;
 let popupEl = null;
+
 let hasSubmitted = false;
 let hasVoted = false;
+
+// Track round so we can reset local flags between rounds
+let lastRoundId = null;
 
 function ensurePopup() {
   if (popupEl) return popupEl;
@@ -26,10 +34,9 @@ function ensurePopup() {
       box-shadow:0 8px 30px rgba(0,0,0,0.3);
     ">
       <h2 style="margin:0 0 6px; font-size:2rem;">🎄 JuleKortet</h2>
-      <!-- 👇 this line now gets its text from ch.text -->
       <p id="jkPrompt" style="margin:0 0 10px; font-weight:700;"></p>
 
-      <div style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
+      <div id="jkTimeRow" style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
         Tid tilbage: <span id="jkTimeLeft">120</span>s
       </div>
 
@@ -56,72 +63,73 @@ function ensurePopup() {
   return popupEl;
 }
 
-export function stopJuleKortet(api) {
+function clearWritingTimer() {
   if (writingTimer) clearInterval(writingTimer);
   writingTimer = null;
+}
+
+export function stopJuleKortet(api) {
+  clearWritingTimer();
   if (popupEl) popupEl.remove();
   popupEl = null;
+
   hasSubmitted = false;
   hasVoted = false;
+  lastRoundId = null;
+
   api?.showStatus?.("");
 }
 
 export function renderJuleKortet(ch, api, socket, myTeamName) {
-  api.setBuzzEnabled(false);
+  api?.setBuzzEnabled?.(false);
+
+  // Reset local flags on new round
+  const roundId = ch?.id ?? null;
+  if (roundId && roundId !== lastRoundId) {
+    lastRoundId = roundId;
+    hasSubmitted = false;
+    hasVoted = false;
+  }
+
   const popup = ensurePopup();
   popup.style.display = "flex";
 
   const promptEl = popup.querySelector("#jkPrompt");
   const timeLeftEl = popup.querySelector("#jkTimeLeft");
+  const timeRow = popup.querySelector("#jkTimeRow");
   const textarea = popup.querySelector("#jkTextarea");
   const sendBtn = popup.querySelector("#jkSendBtn");
   const statusEl = popup.querySelector("#jkStatus");
   const voteWrap = popup.querySelector("#jkVoteWrap");
 
-  // 👇 show the deck's text as the prompt (fallback to old default)
+  // Show prompt
   if (promptEl) {
     promptEl.textContent = ch.text || "Skriv et kort på 2 minutter";
   }
 
-  voteWrap.innerHTML = "";
+  // Always clear voteWrap before rendering phase UI
+  if (voteWrap) voteWrap.innerHTML = "";
+
+  // Helper: server-synced now (falls back safely)
+  const now = () => (typeof api?.nowMs === "function" ? api.nowMs() : Date.now());
 
   // --- WRITING PHASE ---
   if (ch.phase === "writing") {
     hasVoted = false;
+    clearWritingTimer();
 
     textarea.style.display = "block";
     sendBtn.style.display = "inline-block";
-    timeLeftEl.parentElement.style.display = "block";
+    if (timeRow) timeRow.style.display = "block";
 
     textarea.readOnly = hasSubmitted;
     sendBtn.disabled = hasSubmitted;
 
-    statusEl.textContent = hasSubmitted
-      ? "✅ Kort sendt. Vent på afstemning…"
-      : "";
+    statusEl.textContent = hasSubmitted ? "✅ Kort sendt. Vent på afstemning…" : "";
 
-    const startAt = ch.writingStartAt;
-    const total = ch.writingSeconds || 120;
-
-    function tick() {
-      const elapsed = Math.floor((Date.now() - startAt) / 1000);
-      const left = Math.max(0, total - elapsed);
-      timeLeftEl.textContent = left;
-
-      if (left <= 0) {
-        clearInterval(writingTimer);
-        writingTimer = null;
-        autoSubmit();
-      }
-    }
-
-    if (writingTimer) clearInterval(writingTimer);
-    if (!hasSubmitted) writingTimer = setInterval(tick, 250);
-    tick();
-
-    if (!hasSubmitted) setTimeout(() => textarea.focus(), 80);
-
-    sendBtn.onclick = manualSubmit;
+    // ✅ Option 1 fields (from server.js)
+    const startAt = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : now();
+    const total = typeof ch.phaseDurationSec === "number" ? ch.phaseDurationSec : 120;
 
     function manualSubmit() {
       const text = (textarea.value || "").trim();
@@ -134,7 +142,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       sendBtn.disabled = true;
       statusEl.textContent = "✅ Kort sendt!";
 
-     socket.emit("submitCard", { teamName: myTeamName, text });
+      socket.emit("submitCard", { teamName: myTeamName, text });
 
       setTimeout(() => (popup.style.display = "none"), 600);
     }
@@ -152,16 +160,40 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       setTimeout(() => (popup.style.display = "none"), 600);
     }
 
+    function tick() {
+      const elapsed = Math.floor((now() - startAt) / 1000);
+      const left = Math.max(0, total - elapsed);
+      if (timeLeftEl) timeLeftEl.textContent = String(left);
+
+      if (left <= 0) {
+        clearWritingTimer();
+        autoSubmit();
+      }
+    }
+
+    sendBtn.onclick = manualSubmit;
+
+    // Only keep ticking if not already submitted
+    if (!hasSubmitted) {
+      writingTimer = setInterval(tick, 250);
+      tick();
+      setTimeout(() => textarea.focus(), 80);
+    } else {
+      // ensure UI shows correct time even if already submitted
+      tick();
+    }
+
     return;
   }
 
   // --- VOTING PHASE ---
   if (ch.phase === "voting") {
+    clearWritingTimer();
     popup.style.display = "flex";
 
     textarea.style.display = "none";
     sendBtn.style.display = "none";
-    timeLeftEl.parentElement.style.display = "none";
+    if (timeRow) timeRow.style.display = "none";
 
     statusEl.textContent = hasVoted
       ? "✅ Din stemme er afgivet!"
@@ -176,7 +208,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
     `;
 
     cards.forEach((c, i) => {
-      const owner = c.ownerTeamName;     // guaranteed by admin v31
+      const owner = c.ownerTeamName;
       const isMine = owner === myTeamName;
 
       const btn = document.createElement("button");
@@ -199,9 +231,9 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
         socket.emit("vote", i);
 
-        api.showStatus("✅ Din stemme er afgivet!");
+        api?.showStatus?.("✅ Din stemme er afgivet!");
         statusEl.textContent = "✅ Tak for din stemme!";
-        [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
+        [...grid.querySelectorAll("button")].forEach((b) => (b.disabled = true));
       };
 
       grid.appendChild(btn);
@@ -213,11 +245,12 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
   // --- ENDED ---
   if (ch.phase === "ended") {
+    clearWritingTimer();
     popup.style.display = "flex";
 
     textarea.style.display = "none";
     sendBtn.style.display = "none";
-    timeLeftEl.parentElement.style.display = "none";
+    if (timeRow) timeRow.style.display = "none";
 
     const winners = ch.winners || [];
     statusEl.textContent = winners.length
@@ -225,6 +258,10 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       : "🎉 Runden er slut!";
 
     setTimeout(() => (popup.style.display = "none"), 6000);
+    return;
   }
-}
 
+  // Fallback: if unknown phase, just hide
+  clearWritingTimer();
+  popup.style.display = "none";
+}
