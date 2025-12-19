@@ -1,8 +1,8 @@
-// public/minigames/julekortet.js v6
-// Changes:
-// - After pressing Send (or auto-submit), replace input UI with confirmation ("Dit svar er sendt").
-// - When round ends, close popup and restore default team screen ("Vent på læreren...") via api.clearMiniGame().
-// - Uses server-authoritative timing: phaseStartAt + phaseDurationSec (Option 1).
+// public/minigames/julekortet.js v7
+// Fixes:
+// - Prevent flashing / reappearing typing box by NOT relying on stop/recreate per tick
+// - After submit: replace typing UI with stable "Dit svar er sendt" view (no more typing)
+// - Uses server-authoritative timing: phaseStartAt + phaseDurationSec
 
 let writingTimer = null;
 let popupEl = null;
@@ -29,7 +29,6 @@ function ensurePopup() {
       box-shadow:0 8px 30px rgba(0,0,0,0.3);
     ">
       <h2 style="margin:0 0 6px; font-size:2rem;">🎄 JuleKortet</h2>
-
       <p id="jkPrompt" style="margin:0 0 10px; font-weight:700;"></p>
 
       <div id="jkTimerRow" style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
@@ -84,6 +83,18 @@ function clearWritingTimer() {
   writingTimer = null;
 }
 
+function showWriteView(popup) {
+  const writeWrap = popup.querySelector("#jkWriteWrap");
+  const sentWrap = popup.querySelector("#jkSentWrap");
+  const voteWrap = popup.querySelector("#jkVoteWrap");
+  const timerRow = popup.querySelector("#jkTimerRow");
+
+  if (voteWrap) voteWrap.innerHTML = "";
+  if (sentWrap) sentWrap.style.display = "none";
+  if (writeWrap) writeWrap.style.display = "block";
+  if (timerRow) timerRow.style.display = "block";
+}
+
 function showSentView(popup) {
   const writeWrap = popup.querySelector("#jkWriteWrap");
   const sentWrap = popup.querySelector("#jkSentWrap");
@@ -94,6 +105,16 @@ function showSentView(popup) {
   if (voteWrap) voteWrap.innerHTML = "";
   if (timerRow) timerRow.style.display = "none";
   if (sentWrap) sentWrap.style.display = "block";
+}
+
+function showVotingView(popup) {
+  const writeWrap = popup.querySelector("#jkWriteWrap");
+  const sentWrap = popup.querySelector("#jkSentWrap");
+  const timerRow = popup.querySelector("#jkTimerRow");
+
+  if (writeWrap) writeWrap.style.display = "none";
+  if (sentWrap) sentWrap.style.display = "none";
+  if (timerRow) timerRow.style.display = "none";
 }
 
 export function stopJuleKortet(api) {
@@ -113,50 +134,36 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
   const promptEl = popup.querySelector("#jkPrompt");
   const timeLeftEl = popup.querySelector("#jkTimeLeft");
-  const timerRow = popup.querySelector("#jkTimerRow");
-
   const textarea = popup.querySelector("#jkTextarea");
   const sendBtn = popup.querySelector("#jkSendBtn");
   const statusEl = popup.querySelector("#jkStatus");
   const voteWrap = popup.querySelector("#jkVoteWrap");
 
-  const writeWrap = popup.querySelector("#jkWriteWrap");
-  const sentWrap = popup.querySelector("#jkSentWrap");
+  if (promptEl) promptEl.textContent = ch.text || "Skriv et kort på 2 minutter";
 
-  // Prompt text from deck
-  if (promptEl) {
-    promptEl.textContent = ch.text || "Skriv et kort på 2 minutter";
-  }
-
-  // Reset visible sections each render
-  if (voteWrap) voteWrap.innerHTML = "";
-  if (sentWrap) sentWrap.style.display = "none";
-  if (writeWrap) writeWrap.style.display = "block";
-  if (timerRow) timerRow.style.display = "block";
-
-  // --- WRITING PHASE ---
+  // --- WRITING ---
   if (ch.phase === "writing") {
     hasVoted = false;
 
-    // If already submitted, show confirmation view (prevents confusion + extra typing)
+    // If already submitted, keep the confirmation view (do NOT revert)
     if (hasSubmitted) {
       clearWritingTimer();
       showSentView(popup);
       return;
     }
 
-    // Ensure input UI is enabled
+    showWriteView(popup);
+
+    if (statusEl) statusEl.textContent = "";
     if (textarea) {
-      textarea.style.display = "block";
       textarea.readOnly = false;
+      textarea.style.display = "block";
     }
     if (sendBtn) {
-      sendBtn.style.display = "inline-block";
       sendBtn.disabled = false;
+      sendBtn.style.display = "inline-block";
     }
-    if (statusEl) statusEl.textContent = "";
 
-    // Server-authoritative timer: phaseStartAt + phaseDurationSec
     const startAt = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : Date.now();
     const total = typeof ch.phaseDurationSec === "number" ? ch.phaseDurationSec : 120;
 
@@ -177,22 +184,16 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
     setTimeout(() => textarea?.focus?.(), 80);
 
-    function finalizeSubmit(sentSomething) {
+    function finalizeSubmit() {
       hasSubmitted = true;
+      clearWritingTimer();
 
-      // Lock UI and show confirmation screen immediately
-      if (textarea) {
-        textarea.readOnly = true;
-        textarea.blur?.();
-      }
+      // Lock input immediately and show "sent"
+      try { textarea?.blur?.(); } catch {}
+      if (textarea) textarea.readOnly = true;
       if (sendBtn) sendBtn.disabled = true;
 
-      // Replace typing UI with confirmation
       showSentView(popup);
-
-      // Keep popup visible for reassurance (do not close instantly)
-      // You can tweak this delay if you want it to close automatically later.
-      // setTimeout(() => (popup.style.display = "none"), 3000);
     }
 
     function manualSubmit() {
@@ -203,8 +204,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       }
 
       socket.emit("submitCard", { teamName: myTeamName, text });
-      clearWritingTimer();
-      finalizeSubmit(true);
+      finalizeSubmit();
     }
 
     function autoSubmit() {
@@ -212,22 +212,17 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
 
       const text = (textarea?.value || "").trim();
       if (text) socket.emit("submitCard", { teamName: myTeamName, text });
-
-      finalizeSubmit(!!text);
+      finalizeSubmit();
     }
 
     if (sendBtn) sendBtn.onclick = manualSubmit;
     return;
   }
 
-  // --- VOTING PHASE ---
+  // --- VOTING ---
   if (ch.phase === "voting") {
     clearWritingTimer();
-
-    // Hide writing UI
-    if (writeWrap) writeWrap.style.display = "none";
-    if (sentWrap) sentWrap.style.display = "none";
-    if (timerRow) timerRow.style.display = "none";
+    showVotingView(popup);
 
     if (statusEl) {
       statusEl.textContent = hasVoted
@@ -235,8 +230,9 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
         : "Afstemning i gang! Vælg jeres favoritkort.";
     }
 
-    const cards = ch.votingCards || [];
+    if (voteWrap) voteWrap.innerHTML = "";
 
+    const cards = ch.votingCards || [];
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid; gap:10px;
@@ -275,7 +271,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       grid.appendChild(btn);
     });
 
-    if (voteWrap) voteWrap.appendChild(grid);
+    voteWrap?.appendChild(grid);
     return;
   }
 
@@ -283,11 +279,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
   if (ch.phase === "ended") {
     clearWritingTimer();
 
-    // Optional: show winners briefly, then restore default "Vent på læreren..."
-    if (writeWrap) writeWrap.style.display = "none";
-    if (timerRow) timerRow.style.display = "none";
-    if (sentWrap) sentWrap.style.display = "none";
-
+    // Brief message, then close. Team.js will also switch to "Vent på læreren…"
     const winners = ch.winners || [];
     if (statusEl) {
       statusEl.textContent = winners.length
@@ -295,17 +287,15 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
         : "🎉 Runden er slut!";
     }
 
-    // Close popup and restore default team screen text, like other minigames
     setTimeout(() => {
       if (popupEl) popupEl.style.display = "none";
-      // This is the key: returns to your normal "Vent på læreren…" state.
-      api?.clearMiniGame?.();
-    }, 1800);
+      api?.clearMiniGame?.(); // restore default state
+    }, 1200);
 
     return;
   }
 
-  // Fallback: if unknown phase, close and restore
+  // fallback
   clearWritingTimer();
   if (popupEl) popupEl.style.display = "none";
   api?.clearMiniGame?.();
