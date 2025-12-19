@@ -24,7 +24,7 @@ export const juleKortetDeck = [
     id: "j4",
     type: "JuleKortet",
     title: "JK - Mellemnavn",
-    text: "Hvad er julemanden hemmelige mellemnavn?",
+    text: "Hvad er julemandens hemmelige mellemnavn?",
     answer: "Eleverne stemmer",
   },
         {
@@ -91,6 +91,7 @@ export const juleKortetDeck = [
     answer: "Lærerne stemmer",
   }
 ];
+
 
 
 
