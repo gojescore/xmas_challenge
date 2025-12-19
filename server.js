@@ -1,7 +1,10 @@
 // server.js
 // Xmas Challenge – server authoritative timers + phases (Option 1)
-// Keeps existing uploads + legacy events, but adds admin intent events.
-// Also injects serverNow into every "state" emit so clients can render consistent countdowns.
+// Fixes:
+// - Normalize card.type strings so JuleKortet/KreaNissen/etc always start correctly
+// - Grandprix: when typed answer is received, stop the 20s auto-release and wait for admin YES/NO
+// - Grandprix listening uses startAt synced to phaseStartAt (small delay) for more consistent playback
+// Keeps existing uploads + legacy events + serverNow in state emissions
 
 const express = require("express");
 const http = require("http");
@@ -21,7 +24,6 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOAD_DIR = path.join(__dirname, "uploads"); // KreaNissen photos
 const AUDIO_DIR = path.join(__dirname, "uploads-audio"); // voice messages
 
-// Ensure upload folders exist
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
@@ -35,9 +37,7 @@ app.use("/uploads-audio", express.static(AUDIO_DIR));
 const uploadPhoto = multer({ dest: UPLOAD_DIR });
 
 app.post("/upload", uploadPhoto.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ ok: false, message: "Ingen fil modtaget." });
-  }
+  if (!req.file) return res.status(400).json({ ok: false, message: "Ingen fil modtaget." });
   res.json({ ok: true, filename: req.file.filename });
 });
 
@@ -47,22 +47,18 @@ app.post("/upload", uploadPhoto.single("file"), (req, res) => {
 const uploadAudio = multer({ dest: AUDIO_DIR });
 
 app.post("/upload-audio", uploadAudio.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ ok: false, message: "Ingen lydfil modtaget." });
-  }
+  if (!req.file) return res.status(400).json({ ok: false, message: "Ingen lydfil modtaget." });
   res.json({ ok: true, filename: req.file.filename });
 });
 
 // -----------------------------------------------------
-// GAME STATE (kept in memory on the server)
+// GAME STATE
 // -----------------------------------------------------
 let state = {
   teams: [],
   deck: [],
   currentChallenge: null,
   gameCode: null,
-
-  // Optional: track if "game is started"
   startedAt: null,
 };
 
@@ -74,7 +70,6 @@ function nowMs() {
 }
 
 function emitState() {
-  // Do NOT store serverNow in state; attach to emitted payload only.
   io.emit("state", { ...state, serverNow: nowMs() });
 }
 
@@ -129,8 +124,25 @@ function awardPoint(teamName, delta = 1) {
   }
 }
 
+// Normalize card.type to avoid "Julekortet" vs "JuleKortet" bugs
+function normalizeChallengeType(type) {
+  const raw = String(type || "").trim().toLowerCase();
+
+  // remove spaces and punctuation for matching
+  const compact = raw.replace(/[\s\-_]/g, "");
+
+  if (compact === "nissegrandprix") return "Nisse Grandprix";
+  if (compact === "nissegåden" || compact === "nissegaaden") return "NisseGåden";
+  if (compact === "julekortet") return "JuleKortet";
+  if (compact === "kreanissen") return "KreaNissen";
+  if (compact === "billedequiz") return "BilledeQuiz";
+
+  // fallback: return original
+  return type;
+}
+
 // -----------------------------------------------------
-// Server-authoritative timers (one at a time is enough)
+// Server-authoritative timers
 // -----------------------------------------------------
 let phaseTimer = null;
 
@@ -154,7 +166,7 @@ function schedulePhaseEnd(msFromNow, fn) {
 }
 
 // -----------------------------------------------------
-// Challenge transitions (authoritative)
+// Challenge transitions
 // -----------------------------------------------------
 function setChallenge(ch) {
   state.currentChallenge = ch || null;
@@ -162,18 +174,28 @@ function setChallenge(ch) {
   emitState();
 }
 
+function clearCurrentChallenge() {
+  setChallenge(null);
+}
+
+// ---------- GRANDPRIX ----------
 function startGrandprix(card) {
-  // listening phase (not timed by default, but we keep a stable phaseStartAt)
+  // Give a small propagation delay so teams receive state before play triggers
+  const startAt = nowMs() + 300;
+
   const ch = {
     ...card,
+    type: "Nisse Grandprix",
     used: true,
     phase: "listening",
-    phaseStartAt: nowMs(),
-    phaseDurationSec: null, // not timed unless you want
+    phaseStartAt: startAt,
+    phaseDurationSec: null, // not timed
+    startAt,               // audio start timestamp used by client minigame
     firstBuzz: null,
     typedAnswer: null,
     answeredTeams: {},
   };
+
   setChallenge(ch);
 }
 
@@ -182,11 +204,11 @@ function lockGrandprix(teamName) {
   if (!ch || ch.type !== "Nisse Grandprix") return;
   if (ch.phase !== "listening") return;
 
-  // If team already tried this round, ignore buzz
+  // ignore if already tried
   const answered = ch.answeredTeams || {};
   if (answered[teamName]) return;
 
-  ch.phase = "locked";
+  ch.phase = "locked"; // typing window
   ch.phaseStartAt = nowMs();
   ch.phaseDurationSec = 20;
   ch.firstBuzz = { teamName };
@@ -194,24 +216,68 @@ function lockGrandprix(teamName) {
 
   emitState();
 
-  // After 20 sec: treat as "timeout = wrong attempt" and return to listening
+  // After 20s: if NO typed answer, mark as tried + return to listening.
   schedulePhaseEnd(20 * 1000, () => {
     const c = state.currentChallenge;
     if (!c || c.type !== "Nisse Grandprix") return;
+
+    // If we already got a typed answer, we do NOT auto-release.
     if (c.phase !== "locked") return;
+    if (c.typedAnswer && c.typedAnswer.text) return;
 
     const buzzingTeam = c.firstBuzz?.teamName;
     c.answeredTeams = c.answeredTeams || {};
     if (buzzingTeam) c.answeredTeams[buzzingTeam] = true;
 
+    const startAt = nowMs() + 300;
+
     c.phase = "listening";
-    c.phaseStartAt = nowMs();
+    c.phaseStartAt = startAt;
     c.phaseDurationSec = null;
+    c.startAt = startAt;
     c.firstBuzz = null;
     c.typedAnswer = null;
 
     emitState();
   });
+}
+
+function setGrandprixAwaitingDecision() {
+  const ch = state.currentChallenge;
+  if (!ch || ch.type !== "Nisse Grandprix") return;
+  if (ch.phase !== "locked") return;
+
+  // Stop the auto-release timer; wait for admin YES/NO
+  clearPhaseTimer();
+
+  ch.phase = "awaiting";       // new phase: waiting for admin decision
+  ch.phaseStartAt = nowMs();
+  ch.phaseDurationSec = null;  // no countdown
+
+  emitState();
+}
+
+function resumeGrandprixListeningAfterNo() {
+  const ch = state.currentChallenge;
+  if (!ch || ch.type !== "Nisse Grandprix") return;
+
+  const buzzingTeam = ch.firstBuzz?.teamName;
+  if (buzzingTeam) {
+    ch.answeredTeams = ch.answeredTeams || {};
+    ch.answeredTeams[buzzingTeam] = true;
+  }
+
+  const startAt = nowMs() + 300;
+
+  ch.phase = "listening";
+  ch.phaseStartAt = startAt;
+  ch.phaseDurationSec = null;
+  ch.startAt = startAt;
+  ch.firstBuzz = null;
+  ch.typedAnswer = null;
+
+  clearPhaseTimer();
+  emitState();
 }
 
 function endGrandprixRound() {
@@ -226,13 +292,14 @@ function endGrandprixRound() {
 
   emitState();
 
-  // Stop audio everywhere when round ends
   io.emit("gp-stop-audio-now");
 }
 
+// ---------- JULEKORTET ----------
 function startJuleKortet(card) {
   const ch = {
     ...card,
+    type: "JuleKortet",
     used: true,
     phase: "writing",
     phaseStartAt: nowMs(),
@@ -242,10 +309,10 @@ function startJuleKortet(card) {
     votes: {},
     winners: [],
   };
+
   setChallenge(ch);
 
   schedulePhaseEnd(120 * 1000, () => {
-    // If still writing, move to voting
     const c = state.currentChallenge;
     if (!c || c.type !== "JuleKortet") return;
     if (c.phase !== "writing") return;
@@ -267,7 +334,7 @@ function startJuleKortetVoting() {
 
   ch.phase = "voting";
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = null; // keep voting manual close (stable)
+  ch.phaseDurationSec = null;
   ch.votingCards = votingCards;
   ch.votes = {};
   ch.winners = [];
@@ -292,16 +359,12 @@ function finishJuleKortetAndAward() {
   const counts = tallyVotes(ch.votes || {}, cards.length);
   const max = Math.max(...counts);
 
-  const winningIndexes = counts
+  const winners = counts
     .map((c, i) => ({ i, c }))
     .filter((x) => x.c === max)
-    .map((x) => x.i);
-
-  const winners = winningIndexes
-    .map((i) => cards[i]?.ownerTeamName)
+    .map((x) => cards[x.i]?.ownerTeamName)
     .filter(Boolean);
 
-  // Award +1 per winner
   for (const name of winners) awardPoint(name, 1);
 
   ch.phase = "ended";
@@ -311,9 +374,11 @@ function finishJuleKortetAndAward() {
   emitState();
 }
 
+// ---------- KREANISSEN ----------
 function startKreaNissen(card) {
   const ch = {
     ...card,
+    type: "KreaNissen",
     used: true,
     phase: "creating",
     phaseStartAt: nowMs(),
@@ -323,6 +388,7 @@ function startKreaNissen(card) {
     votes: {},
     winners: [],
   };
+
   setChallenge(ch);
 
   schedulePhaseEnd(180 * 1000, () => {
@@ -347,7 +413,7 @@ function startKreaVoting() {
 
   ch.phase = "voting";
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = null; // manual close
+  ch.phaseDurationSec = null;
   ch.votingPhotos = votingPhotos;
   ch.votes = {};
   ch.winners = [];
@@ -372,13 +438,10 @@ function finishKreaAndAward() {
   const counts = tallyVotes(ch.votes || {}, photos.length);
   const max = Math.max(...counts);
 
-  const winningIndexes = counts
+  const winners = counts
     .map((c, i) => ({ i, c }))
     .filter((x) => x.c === max)
-    .map((x) => x.i);
-
-  const winners = winningIndexes
-    .map((i) => photos[i]?.ownerTeamName)
+    .map((x) => photos[x.i]?.ownerTeamName)
     .filter(Boolean);
 
   for (const name of winners) awardPoint(name, 1);
@@ -390,11 +453,12 @@ function finishKreaAndAward() {
   emitState();
 }
 
+// ---------- NISSEGÅDEN / BILLEDEQUIZ ----------
 function startNisseGaaden(card) {
   const ch = {
     ...card,
+    type: "NisseGåden",
     used: true,
-    // Untimed by default
     phase: "answering",
     phaseStartAt: nowMs(),
     phaseDurationSec: null,
@@ -406,6 +470,7 @@ function startNisseGaaden(card) {
 function startBilledeQuiz(card) {
   const ch = {
     ...card,
+    type: "BilledeQuiz",
     used: true,
     phase: "showing",
     phaseStartAt: nowMs(),
@@ -414,12 +479,8 @@ function startBilledeQuiz(card) {
   setChallenge(ch);
 }
 
-function clearCurrentChallenge() {
-  setChallenge(null);
-}
-
 // -----------------------------------------------------
-// Game start/reset/end (authoritative)
+// Game start/reset/end
 // -----------------------------------------------------
 function startGame() {
   state.gameCode = String(Math.floor(1000 + Math.random() * 9000));
@@ -433,11 +494,11 @@ function startGame() {
 function resetGame() {
   state.teams = [];
   state.currentChallenge = null;
-  // Keep gameCode as-is? Your old UX regenerates on start. Here we keep it unless you want otherwise.
-  // If you want reset to also clear code: state.gameCode = null;
+
   if (Array.isArray(state.deck)) {
     state.deck.forEach((c) => (c.used = false));
   }
+
   clearPhaseTimer();
   io.emit("gp-stop-audio-now");
   emitState();
@@ -455,13 +516,12 @@ function endGameAndAnnounceWinner() {
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
       : `Uafgjort: ${winners.map((x) => x.name).join(", ")} – ${topScore} point.`;
 
-  const payload = {
+  io.emit("show-winner", {
     winners: winners.map((w) => w.name),
     topScore,
     message,
-  };
+  });
 
-  io.emit("show-winner", payload);
   emitState();
 }
 
@@ -470,29 +530,19 @@ function endGameAndAnnounceWinner() {
 // -----------------------------------------------------
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
-
-  // Send current state to new client (main or team)
   emitStateTo(socket);
 
-  // ---------------------------------------------
-  // TEAMS: joinGame (code + team name)
-  // ---------------------------------------------
+  // TEAMS: joinGame
   socket.on("joinGame", ({ code, teamName }, cb) => {
     try {
       const trimmedName = (teamName || "").trim();
-      if (!trimmedName) {
-        cb && cb({ ok: false, message: "Tomt teamnavn." });
-        return;
-      }
+      if (!trimmedName) return cb && cb({ ok: false, message: "Tomt teamnavn." });
 
       if (!state.gameCode || String(code) !== String(state.gameCode)) {
-        cb && cb({ ok: false, message: "Forkert kode." });
-        return;
+        return cb && cb({ ok: false, message: "Forkert kode." });
       }
 
-      let team = state.teams.find(
-        (t) => (t.name || "").toLowerCase() === trimmedName.toLowerCase()
-      );
+      let team = state.teams.find((t) => (t.name || "").toLowerCase() === trimmedName.toLowerCase());
 
       if (!team) {
         team = { id: safeId(), name: trimmedName, points: 0 };
@@ -508,48 +558,47 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ---------------------------------------------
-  // ADMIN INTENT EVENTS (Option 1)
-  // ---------------------------------------------
-  socket.on("admin:startGame", () => {
-    startGame();
-  });
-
-  socket.on("admin:resetGame", () => {
-    resetGame();
-  });
+  // ADMIN: intents
+  socket.on("admin:startGame", startGame);
+  socket.on("admin:resetGame", resetGame);
 
   socket.on("admin:selectChallenge", (card) => {
-    // card is the selected deck item from admin UI
     if (!card || !card.type) return;
 
-    // Mark used in server deck too if ids match
-    if (card.id && Array.isArray(state.deck)) {
-      const found = state.deck.find((c) => c.id === card.id);
+    const normalizedType = normalizeChallengeType(card.type);
+    const fixedCard = { ...card, type: normalizedType };
+
+    // mark used in server deck if possible
+    if (fixedCard.id && Array.isArray(state.deck)) {
+      const found = state.deck.find((c) => c.id === fixedCard.id);
       if (found) found.used = true;
     }
 
-    // Stop any ongoing GP audio when switching challenges
+    // stop GP audio when switching challenges
     io.emit("gp-stop-audio-now");
 
-    if (card.type === "Nisse Grandprix") return startGrandprix(card);
-    if (card.type === "JuleKortet") return startJuleKortet(card);
-    if (card.type === "KreaNissen") return startKreaNissen(card);
-    if (card.type === "NisseGåden") return startNisseGaaden(card);
-    if (card.type === "BilledeQuiz") return startBilledeQuiz(card);
+    if (normalizedType === "Nisse Grandprix") return startGrandprix(fixedCard);
+    if (normalizedType === "JuleKortet") return startJuleKortet(fixedCard);
+    if (normalizedType === "KreaNissen") return startKreaNissen(fixedCard);
+    if (normalizedType === "NisseGåden") return startNisseGaaden(fixedCard);
+    if (normalizedType === "BilledeQuiz") return startBilledeQuiz(fixedCard);
 
-    // Default: just set as current challenge, no timers
-    setChallenge({ ...card, used: true, phase: "active", phaseStartAt: nowMs(), phaseDurationSec: null });
+    setChallenge({
+      ...fixedCard,
+      used: true,
+      phase: "active",
+      phaseStartAt: nowMs(),
+      phaseDurationSec: null,
+    });
   });
 
-  // Admin decisions: yes/no/incomplete
   socket.on("admin:decision", ({ decision, selectedTeamId } = {}) => {
     const ch = state.currentChallenge;
     if (!ch) return;
 
     const pickTeamById = () => state.teams.find((t) => t.id === selectedTeamId) || null;
 
-    // Always stop GP audio on any decision (safe)
+    // Always stop GP audio on decisions (safe, consistent)
     io.emit("gp-stop-audio-now");
 
     if (decision === "yes") {
@@ -560,55 +609,33 @@ io.on("connection", (socket) => {
     }
 
     if (decision === "no") {
-      // Grandprix special: mark first buzz as "already answered", return to listening
-      if (ch.type === "Nisse Grandprix" && ch.phase === "locked" && ch.firstBuzz?.teamName) {
-        const buzzingTeam = ch.firstBuzz.teamName;
-        ch.answeredTeams = ch.answeredTeams || {};
-        ch.answeredTeams[buzzingTeam] = true;
-
-        ch.phase = "listening";
-        ch.phaseStartAt = nowMs();
-        ch.phaseDurationSec = null;
-        ch.firstBuzz = null;
-        ch.typedAnswer = null;
-
-        clearPhaseTimer();
-        emitState();
+      // Grandprix: if we are judging a buzz (locked/awaiting), resume listening and mark that team tried
+      if (ch.type === "Nisse Grandprix" && (ch.phase === "locked" || ch.phase === "awaiting")) {
+        resumeGrandprixListeningAfterNo();
         return;
       }
-
-      // Otherwise: cancel challenge
       clearCurrentChallenge();
       return;
     }
 
     if (decision === "incomplete") {
       clearCurrentChallenge();
-      return;
     }
   });
 
   socket.on("admin:closeVoting", () => {
     const ch = state.currentChallenge;
     if (!ch) return;
-
     if (ch.type === "JuleKortet") return finishJuleKortetAndAward();
     if (ch.type === "KreaNissen") return finishKreaAndAward();
   });
 
-  socket.on("admin:endGame", () => {
-    endGameAndAnnounceWinner();
-  });
+  socket.on("admin:endGame", endGameAndAnnounceWinner);
 
-  // ---------------------------------------------
-  // LEGACY: updateState (kept for backward compatibility)
-  // IMPORTANT: If you still call updateState from main.js, it can fight the server timers.
-  // When you finish migrating main.js, you should stop using updateState.
-  // ---------------------------------------------
+  // LEGACY: updateState (kept)
   socket.on("updateState", (newState) => {
     if (!newState) return;
 
-    // Keep your existing points-toast delta logic (legacy)
     const oldIndex = indexTeamsByKey(state.teams);
     const newTeams = Array.isArray(newState.teams) ? newState.teams : state.teams;
 
@@ -621,56 +648,34 @@ io.on("connection", (socket) => {
       const newPts = t.points ?? 0;
       const delta = newPts - oldPts;
 
-      if (delta !== 0) {
-        io.emit("points-toast", { teamName: t.name, delta });
-      }
+      if (delta !== 0) io.emit("points-toast", { teamName: t.name, delta });
     }
 
-    // Replace state with new one
-    state = {
-      ...state,
-      ...newState,
-      teams: newTeams,
-    };
-
+    state = { ...state, ...newState, teams: newTeams };
     emitState();
   });
 
-  // ---------------------------------------------
-  // Winner screen (admin -> all clients) (legacy)
-  // ---------------------------------------------
-  socket.on("show-winner", (payload) => {
-    io.emit("show-winner", payload);
-  });
+  // Legacy winner event
+  socket.on("show-winner", (payload) => io.emit("show-winner", payload));
 
-  // ---------------------------------------------
-  // Voice message (admin -> all clients)
-  // ---------------------------------------------
+  // Voice message
   socket.on("send-voice", (payload) => {
-    // payload: { filename, from, createdAt, mimeType }
     if (!payload || !payload.filename) return;
     io.emit("send-voice", payload);
   });
 
-  // ---------------------------------------------
-  // GRANDPRIX: buzz (team -> server authoritative)
-  // ---------------------------------------------
+  // GRANDPRIX: buzz (authoritative)
   socket.on("buzz", () => {
     const teamName = socket.data.teamName;
     if (!teamName) return;
 
-    // Still emit legacy event so admin UI can react if it listens
-    io.emit("buzzed", teamName);
-
-    // Authoritative lock
+    io.emit("buzzed", teamName); // legacy visibility
     lockGrandprix(teamName);
   });
 
-  // ---------------------------------------------
-  // GRANDPRIX: typed answer (team -> state)
-  // ---------------------------------------------
+  // GRANDPRIX: typed answer
   socket.on("gp-typed-answer", (payload) => {
-    io.emit("gp-typed-answer", payload); // legacy visibility
+    io.emit("gp-typed-answer", payload);
 
     const ch = state.currentChallenge;
     if (!ch || ch.type !== "Nisse Grandprix") return;
@@ -678,16 +683,15 @@ io.on("connection", (socket) => {
 
     const teamName = payload?.teamName;
     const text = payload?.text;
-
     if (!teamName || !text) return;
 
     ch.typedAnswer = { teamName, text };
-    emitState();
+
+    // IMPORTANT FIX: stop the lock timeout and wait for admin YES/NO
+    setGrandprixAwaitingDecision();
   });
 
-  // ---------------------------------------------
-  // NISSEGÅDEN / JULEKORTET: submit text card
-  // ---------------------------------------------
+  // submitCard (NisseGåden / JuleKortet)
   socket.on("submitCard", (payload) => {
     let teamName = null;
     let text = "";
@@ -700,12 +704,11 @@ io.on("connection", (socket) => {
       teamName = payload.teamName || socket.data.teamName || null;
     }
 
-    io.emit("newCard", { teamName, text }); // legacy
+    io.emit("newCard", { teamName, text });
 
     const ch = state.currentChallenge;
     if (!ch) return;
 
-    // NisseGåden answers
     if (ch.type === "NisseGåden") {
       ch.answers = ch.answers || [];
       ch.answers.push({ teamName, text });
@@ -713,7 +716,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // JuleKortet writing submissions
     if (ch.type === "JuleKortet" && ch.phase === "writing") {
       ch.cards = ch.cards || [];
       const already = ch.cards.some((c) => (c.teamName || c.team) === teamName);
@@ -721,21 +723,18 @@ io.on("connection", (socket) => {
 
       emitState();
 
-      // Early close writing if all submitted
       if (state.teams.length > 0 && ch.cards.length >= state.teams.length) {
         startJuleKortetVoting();
       }
     }
   });
 
-  // ---------------------------------------------
-  // KREANISSEN: new uploaded photo
-  // ---------------------------------------------
+  // submitPhoto (KreaNissen)
   socket.on("submitPhoto", ({ teamName, filename }) => {
     if (!filename) return;
     const realTeamName = teamName || socket.data.teamName || "Ukendt hold";
 
-    io.emit("newPhoto", { teamName: realTeamName, filename }); // legacy
+    io.emit("newPhoto", { teamName: realTeamName, filename });
 
     const ch = state.currentChallenge;
     if (!ch) return;
@@ -747,22 +746,18 @@ io.on("connection", (socket) => {
 
       emitState();
 
-      // Early close creating if all submitted
       if (state.teams.length > 0 && ch.photos.length >= state.teams.length) {
         startKreaVoting();
       }
     }
   });
 
-  // Backwards compatibility
   socket.on("newPhoto", (payload) => io.emit("newPhoto", payload));
 
-  // ---------------------------------------------
-  // Voting (team -> server authoritative)
-  // ---------------------------------------------
+  // Voting
   socket.on("vote", (index) => {
     const voter = socket.data.teamName || "Ukendt hold";
-    io.emit("voteUpdate", { voter, index }); // legacy
+    io.emit("voteUpdate", { voter, index });
 
     const ch = state.currentChallenge;
     if (!ch) return;
@@ -774,12 +769,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Backwards compatibility
   socket.on("voteUpdate", (payload) => io.emit("voteUpdate", payload));
 
-  // ---------------------------------------------
-  // Grandprix: stop audio everywhere
-  // ---------------------------------------------
+  // Stop audio everywhere (manual)
   socket.on("gp-stop-audio-now", () => {
     io.emit("gp-stop-audio-now");
     endGrandprixRound();
