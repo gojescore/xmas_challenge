@@ -557,16 +557,23 @@ socket.on("state", (s) => {
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
-  if (isLockedGP && ch.countdownStartAt) {
-    showGrandprixPopup(
-      ch.countdownStartAt,
-      ch.countdownSeconds || 20,
-      iAmFirstBuzz,
-      ch.id
-    );
-  } else {
-    hideGrandprixPopup();
-  }
+// Use countdownStartAt if available, otherwise fall back to startAt
+const gpStart =
+  ch && ch.type === "Nisse Grandprix" && ch.phase === "locked"
+    ? (ch.countdownStartAt ?? ch.startAt ?? null)
+    : null;
+
+if (isLockedGP && gpStart) {
+  showGrandprixPopup(
+    gpStart,
+    ch.countdownSeconds || 20,
+    iAmFirstBuzz,
+    ch.id
+  );
+} else {
+  hideGrandprixPopup();
+}
+
 });
 
 // When points change, show a toast on all teams
@@ -659,3 +666,4 @@ function showVoiceOverlay({ filename, from, createdAt } = {}) {
 socket.on("send-voice", (payload) => {
   showVoiceOverlay(payload || {});
 });
+
