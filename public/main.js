@@ -1,7 +1,8 @@
-// public/main.js v40-option1
-// Option 1: Server-authoritative game (phases/timers decided by server).
-// Admin sends intents: admin:startGame / admin:selectChallenge / admin:decision / admin:closeVoting / admin:resetGame / admin:endGame
-// Keeps: facit line, reload deck, score toast, winner overlay, all minigame admin UI, VOICE panel.
+// public/main.js v41-option1-fixed
+// Fixes:
+// - Auto-select Grandprix first buzz team so YES awards correctly without manual selection
+// - Still supports manual selection for non-Grandprix challenges
+// - No changes to your deck load, voice panel, or other UI flows
 
 const socket = io();
 
@@ -31,7 +32,7 @@ const reloadDeckBtn = document.getElementById("reloadDeckBtn");
 const openVoiceBtn = document.getElementById("openVoiceBtn");
 
 // =====================================================
-// STATE (local mirrors server state; server is authoritative)
+// STATE
 // =====================================================
 let teams = [];
 let selectedTeamId = null;
@@ -40,17 +41,14 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-let serverOffsetMs = 0; // serverNow - Date.now()
-
+let serverOffsetMs = 0;
 const STORAGE_KEY = "xmasChallenge_admin_v40_option1";
 
 // =====================================================
-// Time helpers (for consistent countdown UI only)
+// Time helpers (visual only)
 // =====================================================
 function updateServerOffset(serverNow) {
-  if (typeof serverNow === "number") {
-    serverOffsetMs = serverNow - Date.now();
-  }
+  if (typeof serverNow === "number") serverOffsetMs = serverNow - Date.now();
 }
 function nowMs() {
   return Date.now() + serverOffsetMs;
@@ -90,7 +88,6 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
-  // restart animation
   void scoreToastEl.offsetWidth;
   scoreToastEl.classList.add("score-toast--show");
 
@@ -167,16 +164,8 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
             Vinder af Xmas Challenge
           </h1>
 
-          <p id="winnerOverlayMessage" style="
-            font-size:1.35rem;
-            margin:0 0 0.6rem;
-          "></p>
-
-          <p id="winnerOverlayNames" style="
-            font-size:2rem;
-            font-weight:900;
-            margin:0 0 0.3rem;
-          "></p>
+          <p id="winnerOverlayMessage" style="font-size:1.35rem; margin:0 0 0.6rem;"></p>
+          <p id="winnerOverlayNames" style="font-size:2rem; font-weight:900; margin:0 0 0.3rem;"></p>
 
           <p style="font-size:1.1rem; margin:0 0 0.8rem;">
             Score: <span id="winnerOverlayScore"></span> point
@@ -201,16 +190,8 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   const scoreEl = winnerOverlayEl.querySelector("#winnerOverlayScore");
 
   if (msgEl) msgEl.textContent = message || "";
-  if (namesEl) {
-    namesEl.textContent =
-      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
-  }
-  if (scoreEl) {
-    scoreEl.textContent =
-      typeof topScore === "number" && !Number.isNaN(topScore)
-        ? String(topScore)
-        : "0";
-  }
+  if (namesEl) namesEl.textContent = winners?.length ? winners.join(", ") : "Ingen vinder fundet";
+  if (scoreEl) scoreEl.textContent = Number.isFinite(topScore) ? String(topScore) : "0";
 
   winnerOverlayEl.style.display = "flex";
 }
@@ -381,14 +362,11 @@ function initVoicePanel() {
 }
 
 // =====================================================
-// Persistence (UI convenience only; server is truth)
+// Persistence (UI convenience only)
 // =====================================================
 function saveLocal() {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ deck })
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ deck }));
   } catch {}
 }
 
@@ -402,7 +380,7 @@ function loadLocal() {
 }
 
 // =====================================================
-// Deck load (client loads deck for UI; server stores copy for sharing)
+// Deck load
 // =====================================================
 async function loadDeckSafely() {
   let gp = [];
@@ -441,14 +419,12 @@ async function loadDeckSafely() {
   renderDeck();
   saveLocal();
 
-  // IMPORTANT: sync deck to server (legacy updateState used ONLY for deck storage)
   socket.emit("updateState", { deck });
 }
 
 async function reloadDeck() {
   await loadDeckSafely();
 }
-
 reloadDeckBtn?.addEventListener("click", reloadDeck);
 
 // =====================================================
@@ -480,10 +456,8 @@ function renderDeck() {
     btn.onclick = () => {
       if (card.used) return alert("Denne udfordring er allerede brugt.");
 
-      // Server-authoritative: ask server to start this challenge
       socket.emit("admin:selectChallenge", card);
 
-      // Optimistic UI: mark used locally (server will confirm via state soon)
       card.used = true;
       selectedTeamId = null;
       if (endGameResultEl) endGameResultEl.textContent = "";
@@ -524,9 +498,6 @@ function renderTeams() {
     minus.textContent = "−";
     minus.onclick = (e) => {
       e.stopPropagation();
-
-      // Legacy safe: updateState with modified teams array.
-      // Server will compute points-toast deltas.
       const newTeams = teams.map((t) => {
         if (t.id !== team.id) return t;
         const before = t.points ?? 0;
@@ -542,7 +513,6 @@ function renderTeams() {
     plus.textContent = "+";
     plus.onclick = (e) => {
       e.stopPropagation();
-
       const newTeams = teams.map((t) => {
         if (t.id !== team.id) return t;
         const before = t.points ?? 0;
@@ -580,15 +550,15 @@ function renderCurrentChallenge() {
 
   let facitText = currentChallenge.answer || "";
   if (!facitText) {
-    if (currentChallenge.type === "Nisse Grandprix") {
+    if (String(currentChallenge.type).includes("Grandprix")) {
       facitText = "Eleverne lytter til sangen og buzzer, når de kender svaret.";
-    } else if (currentChallenge.type === "NisseGåden") {
+    } else if (String(currentChallenge.type).toLowerCase().includes("nisse")) {
       facitText = "Eleverne skal gætte gåden og skrive deres svar.";
-    } else if (currentChallenge.type === "JuleKortet") {
+    } else if (String(currentChallenge.type).toLowerCase().includes("jule")) {
       facitText = "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
-    } else if (currentChallenge.type === "KreaNissen") {
+    } else if (String(currentChallenge.type).toLowerCase().includes("krea")) {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
-    } else if (currentChallenge.type === "BilledeQuiz") {
+    } else if (String(currentChallenge.type).toLowerCase().includes("billede")) {
       facitText = "Se på billedet og løs opgaven.";
     }
   }
@@ -597,14 +567,13 @@ function renderCurrentChallenge() {
 }
 
 // =====================================================
-// Admin minigame area (server-authoritative)
+// Admin minigame area
 // =====================================================
 let miniUiTimer = null;
 
 function startMiniUiTick() {
   if (miniUiTimer) clearInterval(miniUiTimer);
   miniUiTimer = setInterval(() => {
-    // Just re-render UI countdown text (visual only)
     renderMiniGameArea();
   }, 250);
 }
@@ -616,7 +585,6 @@ function renderMiniGameArea() {
 
   const ch = currentChallenge;
 
-  // ---------- GRANDPRIX ----------
   if (ch.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
@@ -641,7 +609,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- NISSEGÅDEN ----------
   if (ch.type === "NisseGåden") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
@@ -669,7 +636,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- JULEKORTET ----------
   if (ch.type === "JuleKortet") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
@@ -688,18 +654,6 @@ function renderMiniGameArea() {
       stat.textContent = `Modtaget: ${sent}/${total} julekort`;
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
-
-      const forceBtn = document.createElement("button");
-      forceBtn.textContent = "Afslut og stem nu";
-      forceBtn.className = "challenge-card";
-      forceBtn.onclick = () => socket.emit("admin:closeVoting"); // server will move to ended only if in voting; so we keep separate:
-      // Better: request server to start voting immediately:
-      socket.emit("admin:decision", { decision: "no", selectedTeamId: null }); // NOT correct.
-
-      // We cannot rely on a missing event. So: keep no force here in Option 1 unless server implements it.
-      // Therefore we won't add the button to avoid breaking flow.
-      // (Server auto-switches at timer end or when all teams submitted.)
-      // wrap.appendChild(forceBtn);
     }
 
     if (ch.phase === "voting") {
@@ -741,7 +695,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- KREANISSEN ----------
   if (ch.type === "KreaNissen") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
@@ -760,8 +713,6 @@ function renderMiniGameArea() {
       stat.textContent = `Modtaget: ${sent}/${total} billeder`;
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
-
-      // Same as JuleKortet: server auto-switches to voting at timer end or when all submitted.
     }
 
     if (ch.phase === "voting") {
@@ -803,7 +754,6 @@ function renderMiniGameArea() {
     return;
   }
 
-  // ---------- BILLEDEQUIZ ----------
   if (ch.type === "BilledeQuiz") {
     const wrap = document.createElement("div");
     wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
@@ -819,8 +769,27 @@ function renderMiniGameArea() {
 // =====================================================
 // Decision buttons (server-authoritative)
 // =====================================================
+function autoPickGrandprixTeamIdIfPossible() {
+  const ch = currentChallenge;
+  if (!ch || ch.type !== "Nisse Grandprix") return null;
+  if (!(ch.phase === "locked" || ch.phase === "awaiting")) return null;
+
+  const buzzName = ch.firstBuzz?.teamName;
+  if (!buzzName) return null;
+
+  const team = teams.find((t) => (t.name || "").toLowerCase() === String(buzzName).toLowerCase());
+  return team?.id || null;
+}
+
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
+
+  // FIX: Auto-pick the first buzz team in Grandprix if nothing is selected
+  if (!selectedTeamId) {
+    const autoId = autoPickGrandprixTeamIdIfPossible();
+    if (autoId) selectedTeamId = autoId;
+  }
+
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
   socket.emit("admin:decision", { decision: "yes", selectedTeamId });
@@ -837,7 +806,7 @@ incompleteBtn.onclick = () => {
 };
 
 // =====================================================
-// Reset / End game (server-authoritative)
+// Reset / End game
 // =====================================================
 resetBtn.onclick = () => {
   if (!confirm("Nulstil hele spillet?")) return;
@@ -850,7 +819,7 @@ endGameBtn.onclick = () => {
 };
 
 // =====================================================
-// Start game (server-authoritative)
+// Start game
 // =====================================================
 startGameBtn.onclick = () => {
   socket.emit("admin:startGame");
@@ -858,7 +827,7 @@ startGameBtn.onclick = () => {
 };
 
 // =====================================================
-// Add team manually (optional; legacy updateState)
+// Add team manually (legacy updateState)
 // =====================================================
 addTeamBtn.onclick = () => {
   const name = (teamNameInput?.value || "").trim();
@@ -892,30 +861,26 @@ socket.on("state", (s) => {
 
   updateServerOffset(s.serverNow);
 
-  // Server truth
   if (Array.isArray(s.teams)) teams = s.teams;
   if (s.currentChallenge !== undefined) currentChallenge = s.currentChallenge;
   if (s.gameCode !== undefined) gameCode = s.gameCode;
 
-  // Deck: prefer server deck if present, else keep local deck
-  if (Array.isArray(s.deck) && s.deck.length) {
-    deck = s.deck;
-  }
+  if (Array.isArray(s.deck) && s.deck.length) deck = s.deck;
 
   if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
 
-  // Keep local used flags aligned when server provides deck
+  // FIX: Auto-select GP firstBuzz team when entering locked/awaiting
+  const autoId = autoPickGrandprixTeamIdIfPossible();
+  if (autoId) selectedTeamId = autoId;
+
+  // validate selection
+  if (selectedTeamId && !teams.some((t) => t.id === selectedTeamId)) selectedTeamId = null;
+
   renderTeams();
   renderDeck();
   renderCurrentChallenge();
   renderMiniGameArea();
 
-  // Selection validity
-  if (selectedTeamId && !teams.some((t) => t.id === selectedTeamId)) {
-    selectedTeamId = null;
-  }
-
-  // Persist only deck for UI convenience
   saveLocal();
 });
 
@@ -930,7 +895,6 @@ renderMiniGameArea();
 
 initVoicePanel();
 
-// Button is in HTML, always visible (optional)
 if (openVoiceBtn) {
   openVoiceBtn.onclick = () => {
     initVoicePanel();
