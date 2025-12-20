@@ -1,10 +1,8 @@
-// public/minigames/kreanissen.js v2.2
+// public/minigames/kreanissen.js v2.2.1
 // KreaNissen: camera photo only (take/retake/accept) + anonymous voting
-// Fixes (minimal, preserves your v2 UX):
-// - Uses Option 1 server timing fields: phaseStartAt + phaseDurationSec
-// - After Accept: camera UI is replaced by "✅ Dit billede er sendt. Vent på afstemning…"
-// - New KreaNissen round reliably resets so teams can take a photo again
-// - Voting renders immediately from ch.votingPhotos (like JuleKortet)
+// Keeps your v2.2 fixes exactly.
+// Change (v2.2.1):
+// - Voting status includes "Jeres stemmer"
 
 let timer = null;
 let popup = null;
@@ -413,10 +411,11 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
     if (timerRow) timerRow.style.display = "none";
     setCameraUiMode(pop, "hidden");
 
+    // ✅ Minimal change: add "Jeres stemmer"
     if (statusEl) {
       statusEl.textContent = hasVoted
-        ? "✅ Din stemme er afgivet!"
-        : "Afstemning i gang! Stem på det bedste billede.";
+        ? "Jeres stemmer: ✅ Din stemme er afgivet!"
+        : "Jeres stemmer: Afstemning i gang! Stem på det bedste billede.";
     }
 
     const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
@@ -469,7 +468,7 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         socket.emit("vote", i);
 
         api.showStatus("✅ Din stemme er afgivet!");
-        if (statusEl) statusEl.textContent = "✅ Tak for din stemme!";
+        if (statusEl) statusEl.textContent = "Jeres stemmer: ✅ Tak for din stemme!";
         [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
       };
 
@@ -502,4 +501,3 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
     setTimeout(() => (pop.style.display = "none"), 6000);
   }
 }
-
