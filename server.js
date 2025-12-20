@@ -6,6 +6,7 @@
 // - Grandprix: when typed answer is received, stop the auto-release and wait for admin YES/NO
 // - Grandprix listening uses startAt synced to phaseStartAt (small delay) for more consistent playback
 // - Admin YES can award MULTIPLE winners for non-voting challenges (NOT Grandprix)
+// - NEW PATCH: On admin YES for non-voting challenges, keep currentChallenge alive ~3s so teams can show the correct answer
 // Keeps existing uploads + legacy events + serverNow in state emissions
 
 const express = require("express");
@@ -143,6 +144,11 @@ function normalizeChallengeType(type) {
   return type;
 }
 
+function isNonVotingChallengeType(t) {
+  // These are your “non-voting minigames” you want multi-winner and answer visibility for
+  return t === "NisseGåden" || t === "BilledeQuiz";
+}
+
 // -----------------------------------------------------
 // Server-authoritative timers
 // -----------------------------------------------------
@@ -178,6 +184,33 @@ function setChallenge(ch) {
 
 function clearCurrentChallenge() {
   setChallenge(null);
+}
+
+// NEW: End + hold the challenge in state briefly (to show correct answer / winners)
+function endChallengeWithHold(ms = 3000, extra = {}) {
+  const ch = state.currentChallenge;
+  if (!ch) return;
+
+  // Do not interfere with Grandprix lifecycle
+  if (ch.type === "Nisse Grandprix") {
+    clearCurrentChallenge();
+    return;
+  }
+
+  // Mark ended but keep object alive
+  ch.phase = "ended";
+  ch.phaseStartAt = nowMs();
+  ch.phaseDurationSec = null;
+
+  // Optional: winners etc. for the team popup layer
+  Object.assign(ch, extra);
+
+  emitState();
+
+  // After hold time, clear
+  schedulePhaseEnd(ms, () => {
+    clearCurrentChallenge();
+  });
 }
 
 // ---------- GRANDPRIX ----------
@@ -621,11 +654,23 @@ io.on("connection", (socket) => {
         ? selectedTeamIds
         : (selectedTeamId ? [selectedTeamId] : []);
 
+      const winnerNames = [];
       for (const id of ids) {
         const t = pickTeamById(id);
-        if (t) awardPoint(t.name, 1);
+        if (t) {
+          awardPoint(t.name, 1);
+          winnerNames.push(t.name);
+        }
       }
 
+      // PATCH: keep the challenge alive briefly so teams can show the correct answer
+      // Only applies to your non-voting types (NisseGåden / BilledeQuiz). Others keep existing behavior.
+      if (isNonVotingChallengeType(ch.type)) {
+        endChallengeWithHold(3000, { winners: winnerNames });
+        return;
+      }
+
+      // For anything else non-GP (if you add future types), default to clear immediately
       clearCurrentChallenge();
       return;
     }
@@ -641,6 +686,7 @@ io.on("connection", (socket) => {
     }
 
     if (decision === "incomplete") {
+      // Optional: you can hold here too, but keeping your existing behavior (immediate clear).
       clearCurrentChallenge();
     }
   });
