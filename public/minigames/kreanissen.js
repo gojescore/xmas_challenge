@@ -489,13 +489,14 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
     setCameraUiMode(pop, "hidden");
 
     const winners = ch.winners || [];
-    if (statusEl) {
-      statusEl.textContent = winners.length
-        ? `🎉 Vindere: ${winners.join(", ")}`
-        : "🎉 Runden er slut!";
-    }
+if (statusEl) {
+  statusEl.textContent = winners.length
+    ? `🎉 Vindere: ${winners.join(", ")} — afgjort ved jeres afstemning`
+    : "🎉 Runden er slut! — afgjort ved jeres afstemning";
+}
 
     api?.showStatus?.("Vent på læreren…");
     setTimeout(() => (pop.style.display = "none"), 6000);
   }
 }
+
