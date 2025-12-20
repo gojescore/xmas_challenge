@@ -1,661 +1,504 @@
-// public/minigames/kreanissen.js v6
-// Restores camera capture (take picture) + keeps state-driven voting (fix for disappearing images).
-// Fixes:
-// - Creating phase: camera preview + "Tag billede" + "Send billede" (uploads captured photo)
-// - Fallback: file upload if camera not available
-// - After send: UI replaced by "Dit billede er sendt. Vent på læreren…"
-// - Voting renders immediately from ch.votingPhotos on ALL clients (no dependency on votes)
-// API: renderKreaNissen(ch, api, socket, myTeamName) + stopKreaNissen(api)
+// public/minigames/kreanissen.js v2.2
+// KreaNissen: camera photo only (take/retake/accept) + anonymous voting
+// Fixes (minimal, preserves your v2 UX):
+// - Uses Option 1 server timing fields: phaseStartAt + phaseDurationSec
+// - After Accept: camera UI is replaced by "✅ Dit billede er sendt. Vent på afstemning…"
+// - New KreaNissen round reliably resets so teams can take a photo again
+// - Voting renders immediately from ch.votingPhotos (like JuleKortet)
 
-let popupEl = null;
-
-// per-round flags
-let lastRoundId = null;
+let timer = null;
+let popup = null;
 let hasSubmitted = false;
 let hasVoted = false;
 
-// camera state
+// webcam
 let stream = null;
 let videoEl = null;
 let canvasEl = null;
-let capturedBlob = null;
-let capturedUrl = null;
-let uploading = false;
+let photoImgEl = null;
+let photoBlob = null;
+let previewUrl = null;
+
+// Track current round so a second KreaNissen starts fresh
+let roundKey = "";
 
 function ensurePopup() {
-  if (popupEl) return popupEl;
+  if (popup) return popup;
 
-  popupEl = document.createElement("div");
-  popupEl.id = "kreaPopup";
-  popupEl.style.cssText = `
+  popup = document.createElement("div");
+  popup.id = "kreanissenPopup";
+  popup.style.cssText = `
     position:fixed; inset:0; display:flex; justify-content:center; align-items:center;
     background:rgba(0,0,0,0.65); z-index:9999; padding:16px;
   `;
 
-  popupEl.innerHTML = `
+  popup.innerHTML = `
     <div style="
-      width:min(920px, 96vw);
+      width:min(820px, 96vw);
       background:#fff7ef;
       border:8px solid #0b6;
       border-radius:18px;
       padding:18px;
-      box-shadow:0 8px 30px rgba(0,0,0,0.35);
+      box-shadow:0 8px 30px rgba(0,0,0,0.3);
+      text-align:center;
       font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     ">
-      <h2 style="margin:0 0 6px; font-size:2rem;">🎨 KreaNissen</h2>
-      <p id="knPrompt" style="margin:0 0 12px; font-weight:900;"></p>
-      <div id="knBody"></div>
-      <p id="knStatus" style="margin-top:12px; font-weight:900;"></p>
+      <h2 style="margin:0 0 8px; font-size:2.1rem;">🎨 KreaNissen</h2>
+      <p id="knPrompt" style="font-size:1.3rem; font-weight:800; margin:0 0 10px;"></p>
+
+      <div id="knTimerRow" style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
+        Tid tilbage: <span id="knTimeLeft">180</span>s
+      </div>
+
+      <!-- CAMERA AREA -->
+      <div id="knCameraWrap" style="display:flex; flex-direction:column; gap:10px; align-items:center;">
+        <video id="knVideo" autoplay playsinline style="
+          width:100%; max-width:640px; border-radius:12px; border:2px solid #ccc; background:#000;
+        "></video>
+
+        <img id="knPhotoPreview" style="
+          display:none; width:100%; max-width:640px;
+          border-radius:12px; border:2px solid #ccc;
+        " />
+
+        <canvas id="knCanvas" style="display:none;"></canvas>
+
+        <div id="knButtons" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+          <button id="knTakeBtn" style="
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
+          ">📸 Tag foto</button>
+
+          <button id="knRetryBtn" disabled style="
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#555; color:#fff; cursor:pointer;
+            opacity:0.6;
+          ">🔁 Prøv igen</button>
+
+          <button id="knAcceptBtn" disabled style="
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
+            opacity:0.6;
+          ">✅ Accepter</button>
+        </div>
+
+        <p id="knStatus" style="margin:0; font-weight:800;"></p>
+      </div>
+
+      <div id="knVoteWrap" style="margin-top:14px;"></div>
     </div>
   `;
 
-  document.body.appendChild(popupEl);
-  return popupEl;
+  document.body.appendChild(popup);
+  return popup;
 }
 
-function setStatus(text) {
-  const statusEl = popupEl?.querySelector("#knStatus");
-  if (statusEl) statusEl.textContent = text || "";
-}
-
-function normalize(s) {
-  return (s || "").trim().toLowerCase();
-}
-
-function resetPerRoundIfNeeded(roundId) {
-  if (!roundId) return;
-  if (roundId !== lastRoundId) {
-    lastRoundId = roundId;
-    hasSubmitted = false;
-    hasVoted = false;
-    uploading = false;
-    capturedBlob = null;
-    if (capturedUrl) {
-      try { URL.revokeObjectURL(capturedUrl); } catch {}
-      capturedUrl = null;
-    }
-  }
-}
-
-async function stopCamera() {
-  if (stream) {
-    try {
-      stream.getTracks().forEach((t) => {
-        try { t.stop(); } catch {}
-      });
-    } catch {}
-  }
-  stream = null;
-  videoEl = null;
-  canvasEl = null;
-}
-
-async function ensureCamera(preferBackCamera = true) {
-  // If already running, keep it
-  if (stream && videoEl) return true;
-
-  if (!navigator.mediaDevices?.getUserMedia) return false;
-
-  // Some devices need explicit constraints to get back camera
-  const constraints = {
-    video: preferBackCamera
-      ? { facingMode: { ideal: "environment" } }
-      : { facingMode: { ideal: "user" } },
-    audio: false
-  };
+async function startCamera() {
+  stopCamera();
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    return true;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    });
+
+    if (videoEl) {
+      videoEl.srcObject = stream;
+      await videoEl.play();
+    }
   } catch (err) {
-    // fallback: try any camera
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      return true;
-    } catch {
-      stream = null;
-      return false;
-    }
+    console.error(err);
+    throw new Error("camera_denied");
   }
 }
 
-function dataUrlFromCanvas(canvas) {
-  try {
-    return canvas.toDataURL("image/jpeg", 0.9);
-  } catch {
-    return null;
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => {
+      try { t.stop(); } catch {}
+    });
+    stream = null;
   }
 }
 
-function blobFromCanvas(canvas) {
+function clearPhoto() {
+  photoBlob = null;
+
+  if (previewUrl) {
+    try { URL.revokeObjectURL(previewUrl); } catch {}
+    previewUrl = null;
+  }
+
+  if (photoImgEl) {
+    photoImgEl.src = "";
+    photoImgEl.style.display = "none";
+  }
+  if (videoEl) videoEl.style.display = "block";
+}
+
+function takePhoto() {
+  if (!videoEl || !canvasEl) return;
+
+  const w = videoEl.videoWidth || 640;
+  const h = videoEl.videoHeight || 480;
+
+  canvasEl.width = w;
+  canvasEl.height = h;
+
+  const ctx = canvasEl.getContext("2d");
+  ctx.drawImage(videoEl, 0, 0, w, h);
+
   return new Promise((resolve) => {
-    try {
-      canvas.toBlob(
-        (blob) => resolve(blob || null),
-        "image/jpeg",
-        0.9
-      );
-    } catch {
-      resolve(null);
-    }
+    canvasEl.toBlob((blob) => {
+      photoBlob = blob;
+
+      if (photoImgEl) {
+        if (previewUrl) {
+          try { URL.revokeObjectURL(previewUrl); } catch {}
+        }
+        previewUrl = URL.createObjectURL(blob);
+        photoImgEl.src = previewUrl;
+        photoImgEl.style.display = "block";
+      }
+
+      if (videoEl) videoEl.style.display = "none";
+      resolve(blob);
+    }, "image/jpeg", 0.9);
   });
 }
 
-async function uploadPhotoBlob(blob) {
+async function uploadBlob(blob) {
   const fd = new FormData();
-  fd.append("file", blob, "krea.jpg");
+  fd.append("file", blob, "kreanissen.jpg");
 
   const res = await fetch("/upload", { method: "POST", body: fd });
   if (!res.ok) throw new Error("upload failed");
-
   const json = await res.json();
-  if (!json?.filename) throw new Error("no filename");
   return json.filename;
 }
 
-function stableImgSrc(filename, seed) {
-  // Stable per-phase seed (does not change every re-render)
-  const v = typeof seed === "number" ? seed : 1;
-  return `/uploads/${filename}?v=${v}`;
-}
+function setCameraUiMode(pop, mode) {
+  // mode: "camera" | "submitted" | "hidden"
+  const cameraWrap = pop.querySelector("#knCameraWrap");
+  const voteWrap = pop.querySelector("#knVoteWrap");
 
-function renderSubmittedConfirmation(api) {
-  const body = popupEl.querySelector("#knBody");
-  if (!body) return;
+  if (!cameraWrap || !voteWrap) return;
 
-  body.innerHTML = "";
-  const done = document.createElement("div");
-  done.style.cssText = `
-    padding:14px;
-    border-radius:14px;
-    background:#eafff1;
-    border:2px solid #0b6;
-    font-weight:900;
-    font-size:1.35rem;
-    text-align:center;
-  `;
-  done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
-  body.appendChild(done);
-
-  api?.showStatus?.("Vent på læreren…");
-  setStatus("");
-}
-
-async function renderCreating(ch, api, socket, myTeamName) {
-  const body = popupEl.querySelector("#knBody");
-  if (!body) return;
-
-  body.innerHTML = "";
-
-  if (hasSubmitted) {
-    renderSubmittedConfirmation(api);
+  if (mode === "hidden") {
+    cameraWrap.style.display = "none";
     return;
   }
 
-  const wrap = document.createElement("div");
-  wrap.style.cssText = "display:flex; flex-direction:column; gap:12px;";
+  cameraWrap.style.display = "flex";
 
-  const info = document.createElement("div");
-  info.style.cssText = "font-weight:900; font-size:1.1rem;";
-  info.textContent = "Tag et billede af jeres krea-ting og send det.";
-  wrap.appendChild(info);
+  // Ensure camera controls are visible again (important for round #2)
+  const takeBtn = pop.querySelector("#knTakeBtn");
+  const retryBtn = pop.querySelector("#knRetryBtn");
+  const acceptBtn = pop.querySelector("#knAcceptBtn");
 
-  const controlsRow = document.createElement("div");
-  controlsRow.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
+  if (takeBtn) takeBtn.style.display = "inline-block";
+  if (retryBtn) retryBtn.style.display = "inline-block";
+  if (acceptBtn) acceptBtn.style.display = "inline-block";
 
-  const startCamBtn = document.createElement("button");
-  startCamBtn.type = "button";
-  startCamBtn.textContent = "Start kamera";
-  startCamBtn.style.cssText = `
-    font-size:1.15rem; font-weight:900; padding:10px 12px;
-    border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
-  `;
+  if (mode === "submitted") {
+    // Hide interactive parts but keep status visible
+    if (takeBtn) { takeBtn.disabled = true; }
+    if (retryBtn) { retryBtn.disabled = true; retryBtn.style.opacity = "0.6"; }
+    if (acceptBtn) { acceptBtn.disabled = true; acceptBtn.style.opacity = "0.6"; }
 
-  const flipBtn = document.createElement("button");
-  flipBtn.type = "button";
-  flipBtn.textContent = "Skift kamera";
-  flipBtn.style.cssText = `
-    font-size:1.15rem; font-weight:900; padding:10px 12px;
-    border-radius:12px; border:2px solid #0b6; background:#fff; color:#0b6; cursor:pointer;
-  `;
-  flipBtn.disabled = true;
-
-  const captureBtn = document.createElement("button");
-  captureBtn.type = "button";
-  captureBtn.textContent = "Tag billede";
-  captureBtn.style.cssText = `
-    font-size:1.15rem; font-weight:900; padding:10px 12px;
-    border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
-  `;
-  captureBtn.disabled = true;
-
-  const sendBtn = document.createElement("button");
-  sendBtn.type = "button";
-  sendBtn.textContent = "Send billede";
-  sendBtn.style.cssText = `
-    font-size:1.15rem; font-weight:900; padding:10px 12px;
-    border-radius:12px; border:none; background:#d11; color:#fff; cursor:pointer;
-  `;
-  sendBtn.disabled = true;
-
-  controlsRow.append(startCamBtn, flipBtn, captureBtn, sendBtn);
-  wrap.appendChild(controlsRow);
-
-  const previewArea = document.createElement("div");
-  previewArea.style.cssText = `
-    display:grid;
-    grid-template-columns: 1fr;
-    gap:10px;
-  `;
-
-  // Video preview container
-  const videoWrap = document.createElement("div");
-  videoWrap.style.cssText = `
-    background:#000;
-    border-radius:14px;
-    overflow:hidden;
-    border:2px solid #ddd;
-  `;
-
-  videoEl = document.createElement("video");
-  videoEl.playsInline = true;
-  videoEl.autoplay = true;
-  videoEl.muted = true;
-  videoEl.style.cssText = "width:100%; height:auto; display:block; max-height:420px;";
-  videoWrap.appendChild(videoEl);
-
-  // Captured image preview
-  const imgPreview = document.createElement("img");
-  imgPreview.alt = "Forhåndsvisning";
-  imgPreview.style.cssText = `
-    width:100%;
-    height:auto;
-    max-height:420px;
-    object-fit:contain;
-    border-radius:14px;
-    border:2px solid #ddd;
-    display:none;
-    background:#fff;
-  `;
-
-  previewArea.appendChild(videoWrap);
-  previewArea.appendChild(imgPreview);
-  wrap.appendChild(previewArea);
-
-  // Fallback upload (important for devices without camera / permission denied)
-  const fallbackWrap = document.createElement("div");
-  fallbackWrap.style.cssText = `
-    margin-top:6px;
-    padding-top:10px;
-    border-top:1px dashed #bbb;
-  `;
-  fallbackWrap.innerHTML = `<div style="font-weight:900; margin-bottom:6px;">Hvis kamera ikke virker: upload et billede</div>`;
-
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "image/*";
-  fileInput.style.cssText = "font-size:1.05rem;";
-
-  fallbackWrap.appendChild(fileInput);
-  wrap.appendChild(fallbackWrap);
-
-  body.appendChild(wrap);
-
-  // ---- handlers ----
-  let usingBackCamera = true;
-
-  async function startCamera(preferBack) {
-    setStatus("");
-    const ok = await ensureCamera(preferBack);
-    if (!ok) {
-      setStatus("⚠️ Kamera kunne ikke startes (tilladelse?). Brug upload i stedet.");
-      startCamBtn.disabled = true; // avoid spamming
-      return;
-    }
-
-    try {
-      videoEl.srcObject = stream;
-      await videoEl.play().catch(() => {});
-      captureBtn.disabled = false;
-      flipBtn.disabled = false;
-      startCamBtn.disabled = true;
-      setStatus("");
-    } catch {
-      setStatus("⚠️ Kamera-preview kunne ikke starte. Brug upload i stedet.");
-    }
+    if (videoEl) videoEl.style.display = "none";
+    if (photoImgEl) photoImgEl.style.display = "none";
+    clearPhoto();
   }
-
-  startCamBtn.onclick = () => startCamera(true);
-
-  flipBtn.onclick = async () => {
-    usingBackCamera = !usingBackCamera;
-    captureBtn.disabled = true;
-    flipBtn.disabled = true;
-    startCamBtn.disabled = true;
-    setStatus("⏳ Skifter kamera…");
-
-    await stopCamera();
-
-    const ok = await ensureCamera(usingBackCamera);
-    if (!ok) {
-      setStatus("⚠️ Kunne ikke skifte kamera. Brug upload i stedet.");
-      startCamBtn.disabled = false;
-      return;
-    }
-
-    try {
-      videoEl.srcObject = stream;
-      await videoEl.play().catch(() => {});
-      captureBtn.disabled = false;
-      flipBtn.disabled = false;
-      setStatus("");
-    } catch {
-      setStatus("⚠️ Kamera-preview kunne ikke starte. Brug upload i stedet.");
-      startCamBtn.disabled = false;
-    }
-  };
-
-  captureBtn.onclick = async () => {
-    if (!videoEl) return;
-
-    // create canvas if missing
-    if (!canvasEl) canvasEl = document.createElement("canvas");
-
-    const w = videoEl.videoWidth || 1280;
-    const h = videoEl.videoHeight || 720;
-
-    canvasEl.width = w;
-    canvasEl.height = h;
-
-    const ctx = canvasEl.getContext("2d");
-    if (!ctx) {
-      setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
-      return;
-    }
-
-    try {
-      ctx.drawImage(videoEl, 0, 0, w, h);
-    } catch {
-      setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
-      return;
-    }
-
-    const blob = await blobFromCanvas(canvasEl);
-    if (!blob) {
-      // last resort, dataURL
-      const dataUrl = dataUrlFromCanvas(canvasEl);
-      if (!dataUrl) {
-        setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
-        return;
-      }
-      // convert dataURL to blob
-      try {
-        const r = await fetch(dataUrl);
-        capturedBlob = await r.blob();
-      } catch {
-        setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
-        return;
-      }
-    } else {
-      capturedBlob = blob;
-    }
-
-    if (capturedUrl) {
-      try { URL.revokeObjectURL(capturedUrl); } catch {}
-      capturedUrl = null;
-    }
-    capturedUrl = URL.createObjectURL(capturedBlob);
-
-    imgPreview.src = capturedUrl;
-    imgPreview.style.display = "block";
-
-    sendBtn.disabled = false;
-    setStatus("✅ Billede taget. Tryk “Send billede”.");
-  };
-
-  sendBtn.onclick = async () => {
-    if (uploading) return;
-    if (!capturedBlob) {
-      setStatus("Tag et billede først (eller upload en fil).");
-      return;
-    }
-
-    uploading = true;
-    sendBtn.disabled = true;
-    captureBtn.disabled = true;
-    flipBtn.disabled = true;
-    fileInput.disabled = true;
-    setStatus("⏳ Uploader…");
-
-    try {
-      const filename = await uploadPhotoBlob(capturedBlob);
-
-      socket.emit("submitPhoto", { teamName: myTeamName, filename });
-
-      hasSubmitted = true;
-      await stopCamera();
-      renderSubmittedConfirmation(api);
-    } catch (err) {
-      console.error(err);
-      setStatus("⚠️ Upload fejlede. Prøv igen.");
-      sendBtn.disabled = false;
-      captureBtn.disabled = false;
-      flipBtn.disabled = false;
-      fileInput.disabled = false;
-    } finally {
-      uploading = false;
-    }
-  };
-
-  fileInput.onchange = async () => {
-    if (uploading) return;
-    const f = fileInput.files?.[0] || null;
-    if (!f) return;
-
-    uploading = true;
-    fileInput.disabled = true;
-    setStatus("⏳ Uploader…");
-
-    try {
-      // stop camera if running (avoid confusion)
-      await stopCamera();
-
-      const filename = await (async () => {
-        const fd = new FormData();
-        fd.append("file", f, f.name || "photo.jpg");
-        const res = await fetch("/upload", { method: "POST", body: fd });
-        if (!res.ok) throw new Error("upload failed");
-        const json = await res.json();
-        if (!json?.filename) throw new Error("no filename");
-        return json.filename;
-      })();
-
-      socket.emit("submitPhoto", { teamName: myTeamName, filename });
-
-      hasSubmitted = true;
-      renderSubmittedConfirmation(api);
-    } catch (err) {
-      console.error(err);
-      setStatus("⚠️ Upload fejlede. Prøv igen.");
-      fileInput.disabled = false;
-    } finally {
-      uploading = false;
-    }
-  };
 }
 
-function renderVoting(ch, api, socket, myTeamName) {
-  const body = popupEl.querySelector("#knBody");
-  if (!body) return;
+function maybeResetForNewRound(ch) {
+  // Key off phaseStartAt (server sets it every time the minigame starts)
+  const key = String(ch?.phaseStartAt || "");
+  if (!key) return;
 
-  body.innerHTML = "";
+  if (key !== roundKey) {
+    roundKey = key;
+    hasSubmitted = false;
+    hasVoted = false;
 
-  // Render ONLY from server state (this is what fixes the “images appear after someone votes” bug)
-  const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
-
-  if (!photos.length) {
-    const p = document.createElement("div");
-    p.style.cssText = "font-weight:900; font-size:1.2rem; text-align:center; padding:16px;";
-    p.textContent = "⏳ Vent… der er ingen billeder endnu.";
-    body.appendChild(p);
-    api?.showStatus?.("Vent på læreren…");
-    setStatus("");
-    return;
+    // Reset local camera/preview state
+    clearPhoto();
   }
-
-  const top = document.createElement("div");
-  top.style.cssText = "font-weight:900; font-size:1.2rem; margin-bottom:10px;";
-  top.textContent = hasVoted
-    ? "✅ Din stemme er afgivet!"
-    : "Afstemning i gang! Vælg jeres favoritbillede.";
-  body.appendChild(top);
-
-  const grid = document.createElement("div");
-  grid.style.cssText = `
-    display:grid; gap:10px;
-    grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
-  `;
-
-  const me = normalize(myTeamName);
-  const seed = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
-
-  photos.forEach((p, i) => {
-    const owner = p.ownerTeamName || "";
-    const isMine = normalize(owner) === me;
-
-    const card = document.createElement("button");
-    card.type = "button";
-    card.style.cssText = `
-      text-align:left; padding:10px; border-radius:12px;
-      border:2px solid #0b6; background:#fff; cursor:pointer;
-      font-size:1rem;
-      opacity:${isMine ? 0.45 : 1};
-    `;
-    card.disabled = hasVoted || isMine;
-
-    const img = document.createElement("img");
-    img.alt = `Billede #${i + 1}`;
-    img.style.cssText = "width:100%; height:auto; border-radius:10px; display:block; border:1px solid #ddd;";
-    img.src = stableImgSrc(p.filename, seed);
-
-    const label = document.createElement("div");
-    label.style.cssText = "margin-top:8px; font-weight:900;";
-    label.textContent = `Billede #${i + 1}${isMine ? " (Jeres)" : ""}`;
-
-    card.appendChild(img);
-    card.appendChild(label);
-
-    card.onclick = () => {
-      if (hasVoted || isMine) return;
-
-      hasVoted = true;
-      socket.emit("vote", i);
-
-      api?.showStatus?.("✅ Din stemme er afgivet!");
-      setStatus("✅ Tak for din stemme!");
-      [...grid.querySelectorAll("button")].forEach((b) => (b.disabled = true));
-    };
-
-    grid.appendChild(card);
-  });
-
-  body.appendChild(grid);
-
-  api?.showStatus?.("");
-  setStatus("");
-}
-
-function renderEnded(ch, api) {
-  const body = popupEl.querySelector("#knBody");
-  if (!body) return;
-
-  body.innerHTML = "";
-
-  const winners = Array.isArray(ch.winners) ? ch.winners : [];
-
-  const done = document.createElement("div");
-  done.style.cssText = `
-    padding:14px;
-    border-radius:14px;
-    background:#fff;
-    border:2px solid #0b6;
-    font-weight:900;
-    font-size:1.25rem;
-    text-align:center;
-  `;
-  done.textContent = winners.length
-    ? `🎉 Vindere: ${winners.join(", ")}`
-    : "🎉 Runden er slut!";
-
-  body.appendChild(done);
-
-  // After minigame ends, show the global "vent på læreren…" like your other games
-  api?.showStatus?.("Vent på læreren…");
-  setStatus("");
-
-  setTimeout(() => {
-    if (popupEl) popupEl.style.display = "none";
-  }, 4500);
 }
 
 export function stopKreaNissen(api) {
-  uploading = false;
-  lastRoundId = null;
+  if (timer) clearInterval(timer);
+  timer = null;
+
+  stopCamera();
+
+  if (popup) popup.remove();
+  popup = null;
+
   hasSubmitted = false;
   hasVoted = false;
+  roundKey = "";
 
-  if (capturedUrl) {
-    try { URL.revokeObjectURL(capturedUrl); } catch {}
-    capturedUrl = null;
-  }
-  capturedBlob = null;
-
-  // stop camera stream safely
-  stopCamera();
-
-  if (popupEl) popupEl.remove();
-  popupEl = null;
-
+  clearPhoto();
   api?.showStatus?.("");
-  setStatus("");
 }
 
-export function renderKreaNissen(ch, api, socket, myTeamName) {
-  api?.setBuzzEnabled?.(false);
+export async function renderKreaNissen(ch, api, socket, myTeamName) {
+  api.setBuzzEnabled(false);
 
-  const popup = ensurePopup();
-  popup.style.display = "flex";
+  const pop = ensurePopup();
+  pop.style.display = "flex";
 
-  const promptEl = popup.querySelector("#knPrompt");
-  if (promptEl) {
-    promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede.";
-  }
+  // Reset flags/UI when a NEW KreaNissen round starts
+  maybeResetForNewRound(ch);
 
-  resetPerRoundIfNeeded(ch.id);
+  // DOM inside popup
+  const promptEl = pop.querySelector("#knPrompt");
+  const timeLeftEl = pop.querySelector("#knTimeLeft");
+  const statusEl = pop.querySelector("#knStatus");
+  const voteWrap = pop.querySelector("#knVoteWrap");
+  const timerRow = pop.querySelector("#knTimerRow");
 
-  // phase routing
+  videoEl = pop.querySelector("#knVideo");
+  canvasEl = pop.querySelector("#knCanvas");
+  photoImgEl = pop.querySelector("#knPhotoPreview");
+
+  const takeBtn = pop.querySelector("#knTakeBtn");
+  const retryBtn = pop.querySelector("#knRetryBtn");
+  const acceptBtn = pop.querySelector("#knAcceptBtn");
+
+  if (promptEl) promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede!";
+  if (voteWrap) voteWrap.innerHTML = "";
+
+  // ---------------- CREATING PHASE ----------------
   if (ch.phase === "creating") {
-    // ensure any ended/voting state does not keep camera stopped incorrectly
-    renderCreating(ch, api, socket, myTeamName);
+    hasVoted = false;
+
+    // Ensure voting area cleared
+    if (voteWrap) voteWrap.innerHTML = "";
+
+    // Always show camera wrap in creating phase
+    setCameraUiMode(pop, hasSubmitted ? "submitted" : "camera");
+    if (timerRow) timerRow.style.display = "block";
+
+    if (statusEl) {
+      statusEl.textContent = hasSubmitted
+        ? "✅ Dit billede er sendt. Vent på afstemning…"
+        : "";
+    }
+
+    // Reset button states every render (prevents “round 2 has no choices”)
+    if (takeBtn) { takeBtn.disabled = hasSubmitted; }
+    if (retryBtn) { retryBtn.disabled = true; retryBtn.style.opacity = "0.6"; }
+    if (acceptBtn) { acceptBtn.disabled = true; acceptBtn.style.opacity = "0.6"; }
+
+    // Start camera only if not submitted
+    if (!hasSubmitted) {
+      try {
+        await startCamera();
+      } catch {
+        if (statusEl) statusEl.textContent = "⚠️ Kamera kræver tilladelse.";
+      }
+    } else {
+      stopCamera();
+    }
+
+    if (takeBtn) {
+      takeBtn.onclick = async () => {
+        if (hasSubmitted) return;
+        await takePhoto();
+        if (retryBtn) { retryBtn.disabled = false; retryBtn.style.opacity = "1"; }
+        if (acceptBtn) { acceptBtn.disabled = false; acceptBtn.style.opacity = "1"; }
+      };
+    }
+
+    if (retryBtn) {
+      retryBtn.onclick = () => {
+        if (hasSubmitted) return;
+        clearPhoto();
+        retryBtn.disabled = true;
+        retryBtn.style.opacity = "0.6";
+        if (acceptBtn) {
+          acceptBtn.disabled = true;
+          acceptBtn.style.opacity = "0.6";
+        }
+      };
+    }
+
+    if (acceptBtn) {
+      acceptBtn.onclick = async () => {
+        if (hasSubmitted) return;
+
+        if (!photoBlob) {
+          if (statusEl) statusEl.textContent = "Tag et foto først 🙂";
+          return;
+        }
+
+        hasSubmitted = true;
+
+        if (takeBtn) takeBtn.disabled = true;
+        if (retryBtn) retryBtn.disabled = true;
+        if (acceptBtn) acceptBtn.disabled = true;
+
+        if (statusEl) statusEl.textContent = "⏳ Sender billede…";
+
+        try {
+          const filename = await uploadBlob(photoBlob);
+          socket.emit("submitPhoto", { teamName: myTeamName, filename });
+
+          stopCamera();
+
+          // Replace camera UI with a clear “sent” note and keep popup open
+          setCameraUiMode(pop, "submitted");
+          if (statusEl) statusEl.textContent = "✅ Dit billede er sendt. Vent på afstemning…";
+        } catch (e) {
+          console.error(e);
+          hasSubmitted = false;
+
+          if (takeBtn) takeBtn.disabled = false;
+          if (retryBtn) { retryBtn.disabled = false; retryBtn.style.opacity = "1"; }
+          if (acceptBtn) { acceptBtn.disabled = false; acceptBtn.style.opacity = "1"; }
+
+          if (statusEl) statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
+        }
+      };
+    }
+
+    // Timer (Option 1 fields)
+    const startAt = ch.phaseStartAt;
+    const total = ch.phaseDurationSec ?? 180;
+
+    function tick() {
+      if (typeof startAt !== "number") {
+        if (timeLeftEl) timeLeftEl.textContent = String(total);
+        return;
+      }
+
+      const elapsed = Math.floor((Date.now() - startAt) / 1000);
+      const left = Math.max(0, total - elapsed);
+
+      if (timeLeftEl) timeLeftEl.textContent = String(left);
+
+      if (left <= 0) {
+        clearInterval(timer);
+        timer = null;
+
+        // Auto accept if a photo is already taken
+        if (!hasSubmitted && photoBlob && acceptBtn) {
+          acceptBtn.click();
+        } else {
+          stopCamera();
+          if (!hasSubmitted && statusEl) statusEl.textContent = "⏰ Tiden er gået.";
+          // Popup may remain; server will move to voting when ready
+        }
+      }
+    }
+
+    if (timer) clearInterval(timer);
+    if (!hasSubmitted) timer = setInterval(tick, 250);
+    tick();
+
     return;
   }
 
-  // once voting begins, allow voting even if submitted
+  // ---------------- VOTING PHASE ----------------
   if (ch.phase === "voting") {
-    // we never want the camera running during voting
+    // Stop camera and show voting grid
     stopCamera();
-    renderVoting(ch, api, socket, myTeamName);
+
+    if (timer) clearInterval(timer);
+    timer = null;
+
+    if (timerRow) timerRow.style.display = "none";
+    setCameraUiMode(pop, "hidden");
+
+    if (statusEl) {
+      statusEl.textContent = hasVoted
+        ? "✅ Din stemme er afgivet!"
+        : "Afstemning i gang! Stem på det bedste billede.";
+    }
+
+    const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
+    if (!photos.length) {
+      // Keep stable message (no flicker)
+      if (voteWrap) {
+        voteWrap.innerHTML = `
+          <div style="font-weight:900; padding:14px;">
+            ⏳ Vent… læreren forbereder afstemningen.
+          </div>
+        `;
+      }
+      return;
+    }
+
+    const grid = document.createElement("div");
+    grid.style.cssText = `
+      display:grid; gap:10px;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+    `;
+
+    photos.forEach((p, i) => {
+      const owner = p.ownerTeamName;
+      const isMine = owner === myTeamName;
+
+      const btn = document.createElement("button");
+      btn.style.cssText = `
+        text-align:left; padding:8px; border-radius:12px;
+        border:2px solid #0b6; background:#fff; cursor:pointer;
+        font-size:1.1rem;
+        opacity:${isMine ? 0.45 : 1};
+      `;
+      btn.disabled = isMine || hasVoted;
+
+      // Stable cache-buster tied to this voting start
+      const v = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
+
+      btn.innerHTML = `
+        <div style="font-weight:900;">Billede #${i + 1}</div>
+        <img src="/uploads/${p.filename}?v=${v}" style="
+          width:100%; border-radius:10px; margin-top:6px;
+          border:1px solid #ccc; display:block;
+        "/>
+        ${isMine ? '<div style="margin-top:6px; font-weight:800;">(Dit billede)</div>' : ""}
+      `;
+
+      btn.onclick = () => {
+        if (hasVoted || isMine) return;
+        hasVoted = true;
+        socket.emit("vote", i);
+
+        api.showStatus("✅ Din stemme er afgivet!");
+        if (statusEl) statusEl.textContent = "✅ Tak for din stemme!";
+        [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
+      };
+
+      grid.appendChild(btn);
+    });
+
+    if (voteWrap) voteWrap.appendChild(grid);
     return;
   }
 
+  // ---------------- ENDED PHASE ----------------
   if (ch.phase === "ended") {
     stopCamera();
-    renderEnded(ch, api);
-    return;
-  }
+    if (timer) clearInterval(timer);
+    timer = null;
 
-  // fallback
-  stopCamera();
-  api?.showStatus?.("Vent på læreren…");
-  setStatus("");
+    if (timerRow) timerRow.style.display = "none";
+    setCameraUiMode(pop, "hidden");
+
+    const winners = ch.winners || [];
+    if (statusEl) {
+      statusEl.textContent = winners.length
+        ? `🎉 Vindere: ${winners.join(", ")}`
+        : "🎉 Runden er slut!";
+    }
+
+    // Keep overall UX consistent with your other minigames
+    api?.showStatus?.("Vent på læreren…");
+
+    setTimeout(() => (pop.style.display = "none"), 6000);
+  }
 }
