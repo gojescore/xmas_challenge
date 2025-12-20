@@ -219,13 +219,13 @@ function lockGrandprix(teamName) {
 
   ch.phase = "locked";
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = 20; // NOTE: change to 30 here if you want 30 seconds
+  ch.phaseDurationSec = 30; // NOTE: change to 30 here if you want 30 seconds
   ch.firstBuzz = { teamName };
   ch.typedAnswer = null;
 
   emitState();
 
-  schedulePhaseEnd(20 * 1000, () => { // NOTE: change to 30 * 1000 if you want 30 seconds
+  schedulePhaseEnd(30 * 1000, () => { // NOTE: change to 30 * 1000 if you want 30 seconds
     const c = state.currentChallenge;
     if (!c || c.type !== "Nisse Grandprix") return;
 
@@ -812,3 +812,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
