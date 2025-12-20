@@ -1,9 +1,12 @@
 // server.js
 // Xmas Challenge – server authoritative timers + phases (Option 1)
-// Enhancement:
-// - When points are awarded, optionally include "reason" and/or "answer" in points-toast,
-//   so team screens can show the correct answer after awarding.
-// - Keeps all existing logic intact.
+// Fixes:
+// - Normalize card.type strings so JuleKortet/KreaNissen/etc always start correctly
+// - Grandprix: typing window is 30 seconds (NOT 20)
+// - Grandprix: when typed answer is received, stop the auto-release and wait for admin YES/NO
+// - Grandprix listening uses startAt synced to phaseStartAt (small delay) for more consistent playback
+// - Admin YES can award MULTIPLE winners for non-voting challenges (NOT Grandprix)
+// Keeps existing uploads + legacy events + serverNow in state emissions
 
 const express = require("express");
 const http = require("http");
@@ -110,13 +113,7 @@ function tallyVotes(votesObj, itemsLen) {
   return counts;
 }
 
-/**
- * Award points with optional metadata so team screens can show:
- * - reason (e.g. "Vandt afstemningen")
- * - answer (facit)
- * - challengeType/title (for context)
- */
-function awardPoint(teamName, delta = 1, meta = {}) {
+function awardPoint(teamName, delta = 1) {
   const team = state.teams.find((t) => (t.name || "") === teamName);
   if (!team) return;
 
@@ -125,22 +122,15 @@ function awardPoint(teamName, delta = 1, meta = {}) {
   const actualDelta = (team.points ?? 0) - before;
 
   if (actualDelta !== 0) {
-    io.emit("points-toast", {
-      teamName: team.name,
-      delta: actualDelta,
-
-      // Optional extra info:
-      reason: meta?.reason || "",
-      answer: meta?.answer || "",
-      challengeType: meta?.challengeType || "",
-      challengeTitle: meta?.challengeTitle || "",
-    });
+    io.emit("points-toast", { teamName: team.name, delta: actualDelta });
   }
 }
 
 // Normalize card.type to avoid "Julekortet" vs "JuleKortet" bugs
 function normalizeChallengeType(type) {
   const raw = String(type || "").trim().toLowerCase();
+
+  // remove spaces and punctuation for matching
   const compact = raw.replace(/[\s\-_]/g, "");
 
   if (compact === "nissegrandprix") return "Nisse Grandprix";
@@ -149,6 +139,7 @@ function normalizeChallengeType(type) {
   if (compact === "kreanissen") return "KreaNissen";
   if (compact === "billedequiz") return "BilledeQuiz";
 
+  // fallback: return original
   return type;
 }
 
@@ -191,6 +182,7 @@ function clearCurrentChallenge() {
 
 // ---------- GRANDPRIX ----------
 function startGrandprix(card) {
+  // Give a small propagation delay so teams receive state before play triggers
   const startAt = nowMs() + 300;
 
   const ch = {
@@ -199,8 +191,8 @@ function startGrandprix(card) {
     used: true,
     phase: "listening",
     phaseStartAt: startAt,
-    phaseDurationSec: null,
-    startAt,
+    phaseDurationSec: null, // not timed
+    startAt,               // audio start timestamp used by client minigame
     firstBuzz: null,
     typedAnswer: null,
     answeredTeams: {},
@@ -214,21 +206,27 @@ function lockGrandprix(teamName) {
   if (!ch || ch.type !== "Nisse Grandprix") return;
   if (ch.phase !== "listening") return;
 
+  // ignore if already tried
   const answered = ch.answeredTeams || {};
   if (answered[teamName]) return;
 
-  ch.phase = "locked";
+  ch.phase = "locked"; // typing window
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = 30; // NOTE: change to 30 here if you want 30 seconds
+
+  // IMPORTANT: 30 seconds typing window (must stay 30)
+  ch.phaseDurationSec = 30;
+
   ch.firstBuzz = { teamName };
   ch.typedAnswer = null;
 
   emitState();
 
-  schedulePhaseEnd(30 * 1000, () => { // NOTE: change to 30 * 1000 if you want 30 seconds
+  // After 30s: if NO typed answer, mark as tried + return to listening.
+  schedulePhaseEnd(30 * 1000, () => {
     const c = state.currentChallenge;
     if (!c || c.type !== "Nisse Grandprix") return;
 
+    // If we already got a typed answer, we do NOT auto-release.
     if (c.phase !== "locked") return;
     if (c.typedAnswer && c.typedAnswer.text) return;
 
@@ -254,11 +252,12 @@ function setGrandprixAwaitingDecision() {
   if (!ch || ch.type !== "Nisse Grandprix") return;
   if (ch.phase !== "locked") return;
 
+  // Stop the auto-release timer; wait for admin YES/NO
   clearPhaseTimer();
 
-  ch.phase = "awaiting";
+  ch.phase = "awaiting";       // new phase: waiting for admin decision
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = null;
+  ch.phaseDurationSec = null;  // no countdown
 
   emitState();
 }
@@ -371,14 +370,7 @@ function finishJuleKortetAndAward() {
     .map((x) => cards[x.i]?.ownerTeamName)
     .filter(Boolean);
 
-  // Provide context toast (no "answer" here, but a reason)
-  for (const name of winners) {
-    awardPoint(name, 1, {
-      reason: "Vandt afstemningen (JuleKortet)",
-      challengeType: ch.type,
-      challengeTitle: ch.title || "",
-    });
-  }
+  for (const name of winners) awardPoint(name, 1);
 
   ch.phase = "ended";
   ch.phaseStartAt = nowMs();
@@ -457,13 +449,7 @@ function finishKreaAndAward() {
     .map((x) => photos[x.i]?.ownerTeamName)
     .filter(Boolean);
 
-  for (const name of winners) {
-    awardPoint(name, 1, {
-      reason: "Vandt afstemningen (KreaNissen)",
-      challengeType: ch.type,
-      challengeTitle: ch.title || "",
-    });
-  }
+  for (const name of winners) awardPoint(name, 1);
 
   ch.phase = "ended";
   ch.phaseStartAt = nowMs();
@@ -587,11 +573,13 @@ io.on("connection", (socket) => {
     const normalizedType = normalizeChallengeType(card.type);
     const fixedCard = { ...card, type: normalizedType };
 
+    // mark used in server deck if possible
     if (fixedCard.id && Array.isArray(state.deck)) {
       const found = state.deck.find((c) => c.id === fixedCard.id);
       if (found) found.used = true;
     }
 
+    // stop GP audio when switching challenges
     io.emit("gp-stop-audio-now");
 
     if (normalizedType === "Nisse Grandprix") return startGrandprix(fixedCard);
@@ -609,35 +597,41 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("admin:decision", ({ decision, selectedTeamId } = {}) => {
+  // ADMIN: decision (YES can be multi-select for non-voting, but Grandprix is single-select)
+  socket.on("admin:decision", ({ decision, selectedTeamId, selectedTeamIds } = {}) => {
     const ch = state.currentChallenge;
     if (!ch) return;
 
-    const pickTeamById = () => state.teams.find((t) => t.id === selectedTeamId) || null;
+    const pickTeamById = (id) => state.teams.find((t) => t.id === id) || null;
 
+    // Always stop GP audio on decisions (safe, consistent)
     io.emit("gp-stop-audio-now");
 
     if (decision === "yes") {
-      const t = pickTeamById();
-      if (t) {
-        // Try to provide a facit/answer for team screens
-        const answer =
-          (typeof ch.answer === "string" && ch.answer.trim())
-            ? ch.answer.trim()
-            : "";
-
-        awardPoint(t.name, 1, {
-          reason: "Korrekt!",
-          answer,
-          challengeType: ch.type || "",
-          challengeTitle: ch.title || "",
-        });
+      // Grandprix must remain SINGLE winner selection
+      if (ch.type === "Nisse Grandprix") {
+        const t = pickTeamById(selectedTeamId);
+        if (t) awardPoint(t.name, 1);
+        clearCurrentChallenge();
+        return;
       }
+
+      // Non-voting challenges: allow MULTIPLE winners
+      const ids = Array.isArray(selectedTeamIds)
+        ? selectedTeamIds
+        : (selectedTeamId ? [selectedTeamId] : []);
+
+      for (const id of ids) {
+        const t = pickTeamById(id);
+        if (t) awardPoint(t.name, 1);
+      }
+
       clearCurrentChallenge();
       return;
     }
 
     if (decision === "no") {
+      // Grandprix: if we are judging a buzz (locked/awaiting), resume listening and mark that team tried
       if (ch.type === "Nisse Grandprix" && (ch.phase === "locked" || ch.phase === "awaiting")) {
         resumeGrandprixListeningAfterNo();
         return;
@@ -683,19 +677,21 @@ io.on("connection", (socket) => {
     emitState();
   });
 
+  // Legacy winner event
   socket.on("show-winner", (payload) => io.emit("show-winner", payload));
 
+  // Voice message
   socket.on("send-voice", (payload) => {
     if (!payload || !payload.filename) return;
     io.emit("send-voice", payload);
   });
 
-  // GRANDPRIX: buzz
+  // GRANDPRIX: buzz (authoritative)
   socket.on("buzz", () => {
     const teamName = socket.data.teamName;
     if (!teamName) return;
 
-    io.emit("buzzed", teamName);
+    io.emit("buzzed", teamName); // legacy visibility
     lockGrandprix(teamName);
   });
 
@@ -712,6 +708,8 @@ io.on("connection", (socket) => {
     if (!teamName || !text) return;
 
     ch.typedAnswer = { teamName, text };
+
+    // IMPORTANT FIX: stop the lock timeout and wait for admin YES/NO
     setGrandprixAwaitingDecision();
   });
 
@@ -795,6 +793,7 @@ io.on("connection", (socket) => {
 
   socket.on("voteUpdate", (payload) => io.emit("voteUpdate", payload));
 
+  // Stop audio everywhere (manual)
   socket.on("gp-stop-audio-now", () => {
     io.emit("gp-stop-audio-now");
     endGrandprixRound();
@@ -812,4 +811,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
-
