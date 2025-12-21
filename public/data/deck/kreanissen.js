@@ -5,7 +5,7 @@ export const DECK = [
   {
     id: "kn1",
     type: "KreaNissen",
-    title: "Sjoveste nisse",
+    title: "KN - Sjoveste nisse",
     text: "Lav den sjoveste nisse med ting i klassen. Tag et billede!",
     answer: "Afgjort ved afstemning",
     used: false
@@ -13,13 +13,14 @@ export const DECK = [
   {
     id: "kn2",
     type: "KreaNissen",
-    title: "Julebillede (klassen)",
+    title: "KN - Julebillede (klassen)",
     text: "Tag et julebillede af klassen!",
     answer: "Afgjort ved afstemning",
     used: false
   }
  
 ];
+
 
 
 
