@@ -129,7 +129,37 @@ export const nisseGaaden = [
     answer: "Snekugle",
     used: false
   },
-
+        {
+    id: "ng17",
+    type: "NisseGåden",
+    title: "NG26 - Emojisang (1)",
+    text: "🚗💨➡️🏠🎄",
+    answer: "Driving Home for Christmas",
+    used: false
+  },
+        {
+    id: "ng18",
+    type: "NisseGåden",
+    title: "NG26 - Emojisang (1)",
+    text: "🏠⬆️🧝‍♂️🪑🥣",
+    answer: "På loftet sidder nissen",
+    used: false
+  },
+          {
+    id: "ng19",
+    type: "NisseGåden",
+    title: "NG26 - Emojisang (1)",
+    text: "🎸💃🔄🎄",
+    answer: "Rockin' Around the Christmas Tree",
+    used: false
+  },
+      id: "ng20",
+    type: "NisseGåden",
+    title: "NG26 - Emojisang (1)",
+    text: "🎄😎🧊🎤",
+    answer: "Det' jul, det' cool",
+    used: false
+  },
 ];
 
 
