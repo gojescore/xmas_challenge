@@ -97,8 +97,30 @@ export const nisseGaaden = [
   }
 
 ];
-
-
+    {
+    id: "ng13",
+    type: "NisseGåden",
+    title: "NG - Hvad er jeg (5)",
+    text: "Jeg er lille og gemmer mig blandt mange. Finder du mig, kan du vinde noget, men du må helst ikke afsløre mig for tidligt.",
+    answer: "Mandlen",
+    used: false
+  },
+    {
+    id: "ng14",
+    type: "NisseGåden",
+    title: "NG - Hvad er jeg (5)",
+    text: "Jeg er rund, men triller ingen steder. Jeg bærer fire, som langsomt forsvinder, mens spændingen vokser.",
+    answer: "Adventskrans",
+    used: false
+  },
+    {
+    id: "ng15",
+    type: "NisseGåden",
+    title: "NG - Hvad er jeg (5)",
+    text: "Jeg bliver flettet, men har intet hår. Jeg har ingen mave, men bliver alligevel fyldt med søde sager.",
+    answer: "Julehjerte",
+    used: false
+  },
 
 
 
