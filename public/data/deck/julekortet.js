@@ -89,7 +89,14 @@ export const juleKortetDeck = [
     title: "LærerKortet - Midt i skorstenen",
     text: "Julemanden stoppede halvvejs nede i skorstenen fordi han så..",
     answer: "Afgjort ved afstemning",
-  }
+  },
+    {
+    id: "j14",
+    type: "JuleKortet",
+    title: "JK26 - Snemandens sidste tanker",
+    text: "Hvad er en snemands sidste tanker, før den smelter?",
+    answer: "Afgjort ved afstemning",
+  },
 ];
 
 
