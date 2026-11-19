@@ -153,6 +153,7 @@ export const nisseGaaden = [
     answer: "Rockin' Around the Christmas Tree",
     used: false
   },
+  {
       id: "ng20",
     type: "NisseGåden",
     title: "NG26 - Emojisang (1)",
