@@ -6,7 +6,7 @@ export const grandprixDeck = [
     type: "Nisse Grandprix",
     title: "GP - Højt fra træets grønne top",
     text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
-    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/Hojt%20fra%20traets%20gronne%20top%20__%20DR%20Danish%20National%20Girls%20Choir.mp3",
     answer: "Højt fra træets grønne top",
     used: false
   },
