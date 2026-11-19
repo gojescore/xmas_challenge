@@ -36,8 +36,15 @@ export const grandprixDeck = [
     audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/EdTinkas%20Juleeventyrs.mp3",
     answer: "Tinka",
     used: false
-  }
-  
+  },
+      id: "gp5",
+    type: "Nisse Grandprix",
+    title: "GP - Risengrod",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://supabase.com/dashboard/project/ldaskskrbotxxhoqdzdc/storage/files/buckets/grandprix-audio?preview=26DeteErRisengroed.mp3",
+    answer: "Det er risengrod",
+    used: false
+  },
 ];
 
 
