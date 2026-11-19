@@ -40,7 +40,7 @@ export const grandprixDeck = [
   {
     id: "gp5",
     type: "Nisse Grandprix",
-    title: "GP - Risengrod",
+    title: "GP26 - Risengrod",
     text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
     audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26DeteErRisengroed.mp3",
     answer: "Det er risengrod",
