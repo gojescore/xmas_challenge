@@ -37,7 +37,8 @@ export const grandprixDeck = [
     answer: "Tinka",
     used: false
   },
-      id: "gp5",
+  {
+    id: "gp5",
     type: "Nisse Grandprix",
     title: "GP - Risengrod",
     text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
