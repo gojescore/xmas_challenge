@@ -46,6 +46,51 @@ export const grandprixDeck = [
     answer: "Det er risengrod",
     used: false
   },
+  {
+  id: "gp6",
+    type: "Nisse Grandprix",
+    title: "GP26 - CoolJul",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26JulDetErCool.mp3",
+    answer: "Det er jul det er cool",
+    used: false
+  },
+    {
+  id: "gp7",
+    type: "Nisse Grandprix",
+    title: "GP26 - LastXmas",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26LastXmas.mp3",
+    answer: "Last Xmas",
+    used: false
+  },
+      {
+  id: "gp8",
+    type: "Nisse Grandprix",
+    title: "GP26 - Grinch",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26mrGrinch.mp3",
+    answer: "Mr. Grinch",
+    used: false
+  },
+        {
+  id: "gp9",
+    type: "Nisse Grandprix",
+    title: "GP26 - Nu det jul",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26Nu_det_jul_igen_Pibende_ballon_mellem%20(1).mp3",
+    answer: "Nu det jul igen",
+    used: false
+  },
+          {
+  id: "gp10",
+    type: "Nisse Grandprix",
+    title: "GP26 - Rudolf",
+    text: "Lyt til lydklippet, vær først til at trykke BUZZ, og skriv titlen.", // 👈 opgave-tekst
+    audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/26RudolfMedDenRodeTud.mp3",
+    answer: "Rudolf med den rode tud",
+    used: false
+  },
 ];
 
 
