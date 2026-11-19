@@ -94,9 +94,9 @@ export const nisseGaaden = [
     text: "Vælg en deltager, skriv hvem her, og send personen ned til kontoret. Vinderen af udfordringen får point.",
     answer: "Find flest nisser",
     used: false
-  }
+  },
 
-];
+
     {
     id: "ng13",
     type: "NisseGåden",
@@ -130,7 +130,7 @@ export const nisseGaaden = [
     used: false
   },
 
-
+];
 
 
 
