@@ -121,6 +121,14 @@ export const nisseGaaden = [
     answer: "Julehjerte",
     used: false
   },
+    {
+    id: "ng16",
+    type: "NisseGåden",
+    title: "NG - Hvad er jeg (5)",
+    text: "Jeg bliver ofte rystet, men aldrig svimmel. Jeg gemmer på en lille verden, hvor det kan sne selv midt om sommeren.",
+    answer: "Snekugle",
+    used: false
+  },
 
 
 
